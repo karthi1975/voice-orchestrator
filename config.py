@@ -29,3 +29,16 @@ DEBUG = True
 
 # Test mode (set to True to test without Home Assistant)
 TEST_MODE = True  # Set to False when you have Home Assistant running
+
+# ============================================================================
+# FUTUREPROOFHOME CONFIGURATION
+# ============================================================================
+
+# Enable/disable FutureProof Homes integration
+FUTUREPROOFHOME_ENABLED = True
+
+# Default home_id if not provided in requests
+DEFAULT_HOME_ID = "home_1"
+
+# Logging for FutureProof Homes requests
+LOG_FPH_REQUESTS = True

@@ -8,8 +8,12 @@ from typing import Optional, Tuple
 from config import WORDS, NUMBERS, CHALLENGE_EXPIRY_SECONDS, MAX_ATTEMPTS
 
 # In-memory storage for challenges
+# Multi-client support: separate namespaces for different integration types
 # In production, use Redis or a database
-challenges = {}
+challenges = {
+    'alexa': {},           # Alexa Skill integration (session-based)
+    'futureproofhome': {}  # FutureProof Homes integration (home_id-based)
+}
 
 
 def generate_challenge() -> str:
@@ -24,64 +28,79 @@ def generate_challenge() -> str:
     return f"{word} {number}"
 
 
-def store_challenge(session_id: str, challenge: str) -> None:
+def store_challenge(identifier: str, challenge: str, client_type: str = 'alexa', intent: Optional[str] = None) -> None:
     """
-    Store a challenge for a session with timestamp and attempt count.
+    Store a challenge for a session/home with timestamp and attempt count.
+
+    Supports multiple client types with isolated storage namespaces.
 
     Args:
-        session_id: Unique session identifier
+        identifier: Unique identifier (session_id for Alexa, home_id for FutureProof Homes)
         challenge: Challenge phrase to store
+        client_type: Client type ('alexa' or 'futureproofhome'), defaults to 'alexa'
+        intent: Optional intent to execute after verification (used by FutureProof Homes)
     """
-    challenges[session_id] = {
+    if client_type not in challenges:
+        challenges[client_type] = {}
+
+    challenges[client_type][identifier] = {
         'challenge': challenge.lower(),
         'timestamp': time.time(),
-        'attempts': 0
+        'attempts': 0,
+        'intent': intent
     }
 
 
-def validate_challenge(session_id: str, spoken_response: str) -> Tuple[bool, str]:
+def validate_challenge(identifier: str, spoken_response: str, client_type: str = 'alexa') -> Tuple[bool, str, Optional[str]]:
     """
     Validate the spoken response against the stored challenge.
 
+    Supports multiple client types with isolated storage namespaces.
+
     Args:
-        session_id: Unique session identifier
+        identifier: Unique identifier (session_id for Alexa, home_id for FutureProof Homes)
         spoken_response: User's spoken response
+        client_type: Client type ('alexa' or 'futureproofhome'), defaults to 'alexa'
 
     Returns:
-        Tuple of (is_valid, message)
+        Tuple of (is_valid, message, intent)
+        - is_valid: True if challenge passed
+        - message: Human-readable status message
+        - intent: The stored intent (if any) for successful validation
     """
-    if session_id not in challenges:
-        return False, "No active challenge found. Please start over."
+    if client_type not in challenges or identifier not in challenges[client_type]:
+        return False, "No active challenge found. Please start over.", None
 
-    challenge_data = challenges[session_id]
+    challenge_data = challenges[client_type][identifier]
 
     # Check if challenge has expired
     elapsed = time.time() - challenge_data['timestamp']
     if elapsed > CHALLENGE_EXPIRY_SECONDS:
-        del challenges[session_id]
-        return False, "Challenge expired. Please start over."
+        del challenges[client_type][identifier]
+        return False, "Challenge expired. Please start over.", None
 
     # Check attempt count
     challenge_data['attempts'] += 1
     if challenge_data['attempts'] > MAX_ATTEMPTS:
-        del challenges[session_id]
-        return False, "Maximum attempts exceeded. Please start over."
+        del challenges[client_type][identifier]
+        return False, "Maximum attempts exceeded. Please start over.", None
 
     # Normalize and compare
     normalized_response = normalize_response(spoken_response)
     expected = challenge_data['challenge']
 
     if normalized_response == expected:
-        # Clean up successful challenge
-        del challenges[session_id]
-        return True, "Voice verified successfully"
+        # Clean up successful challenge and return intent
+        intent = challenge_data.get('intent')
+        del challenges[client_type][identifier]
+        return True, "Voice verified successfully", intent
     else:
         remaining = MAX_ATTEMPTS - challenge_data['attempts']
         if remaining > 0:
-            return False, f"Incorrect response. {remaining} attempts remaining."
+            return False, f"Incorrect response. {remaining} attempts remaining.", None
         else:
-            del challenges[session_id]
-            return False, "Maximum attempts exceeded. Please start over."
+            del challenges[client_type][identifier]
+            return False, "Maximum attempts exceeded. Please start over.", None
 
 
 def normalize_response(text: str) -> str:
@@ -134,20 +153,81 @@ def normalize_response(text: str) -> str:
     return ' '.join(text.split())
 
 
-def clear_expired_challenges() -> int:
+def clear_challenge(identifier: str, client_type: str = 'alexa') -> bool:
+    """
+    Clear a specific challenge from storage.
+
+    Args:
+        identifier: Unique identifier to clear
+        client_type: Client type ('alexa' or 'futureproofhome'), defaults to 'alexa'
+
+    Returns:
+        True if challenge was found and cleared, False otherwise
+    """
+    if client_type in challenges and identifier in challenges[client_type]:
+        del challenges[client_type][identifier]
+        return True
+    return False
+
+
+def get_challenge_data(identifier: str, client_type: str = 'alexa') -> Optional[dict]:
+    """
+    Get challenge data for a specific identifier.
+
+    Args:
+        identifier: Unique identifier
+        client_type: Client type ('alexa' or 'futureproofhome'), defaults to 'alexa'
+
+    Returns:
+        Challenge data dict or None if not found
+    """
+    if client_type in challenges and identifier in challenges[client_type]:
+        return challenges[client_type][identifier].copy()
+    return None
+
+
+def get_all_challenges(client_type: Optional[str] = None) -> dict:
+    """
+    Get all challenges, optionally filtered by client type.
+
+    Args:
+        client_type: Optional client type filter ('alexa' or 'futureproofhome')
+
+    Returns:
+        Dict of challenges (all or filtered by client type)
+    """
+    if client_type:
+        return challenges.get(client_type, {}).copy()
+    return {k: v.copy() for k, v in challenges.items()}
+
+
+def clear_expired_challenges(client_type: Optional[str] = None) -> int:
     """
     Clean up expired challenges from memory.
+
+    Args:
+        client_type: Optional client type to clean ('alexa' or 'futureproofhome')
+                    If None, cleans all client types
 
     Returns:
         Number of challenges cleared
     """
     current_time = time.time()
-    expired = [
-        session_id for session_id, data in challenges.items()
-        if current_time - data['timestamp'] > CHALLENGE_EXPIRY_SECONDS
-    ]
+    cleared_count = 0
 
-    for session_id in expired:
-        del challenges[session_id]
+    client_types_to_clean = [client_type] if client_type else challenges.keys()
 
-    return len(expired)
+    for ct in client_types_to_clean:
+        if ct not in challenges:
+            continue
+
+        expired = [
+            identifier for identifier, data in challenges[ct].items()
+            if current_time - data['timestamp'] > CHALLENGE_EXPIRY_SECONDS
+        ]
+
+        for identifier in expired:
+            del challenges[ct][identifier]
+            cleared_count += 1
+
+    return cleared_count

@@ -32,7 +32,7 @@ def simulate_flow():
 
     # Step 4: User repeats the challenge
     print(f"[Step 4] User: '{challenge}'")
-    is_valid, validation_msg = validate_challenge(session_id, challenge)
+    is_valid, validation_msg, _ = validate_challenge(session_id, challenge)
     print(f"Validation: {validation_msg}\n")
 
     # Step 5: If valid, trigger the scene
@@ -66,7 +66,7 @@ def test_wrong_response():
     print(f"Alexa: 'Security check required. Please say: {challenge}'")
     print("User: 'wrong phrase'\n")
 
-    is_valid, validation_msg = validate_challenge(session_id, "wrong phrase")
+    is_valid, validation_msg, _ = validate_challenge(session_id, "wrong phrase")
     print(f"Result: {validation_msg}")
 
     if not is_valid:
@@ -95,7 +95,7 @@ def test_variations():
         print(f"Challenge: '{expected}'")
         print(f"User says: '{spoken}'")
 
-        is_valid, msg = validate_challenge(session_id, spoken)
+        is_valid, msg, _ = validate_challenge(session_id, spoken)
         status = "✓" if is_valid else "✗"
         print(f"{status} {msg}\n")
 

@@ -61,14 +61,14 @@ def test_validation_flow():
     print(f"  Stored challenge: {challenge}")
 
     # Test correct response
-    valid, message = validate_challenge(session_id, "ocean four")
+    valid, message, intent = validate_challenge(session_id, "ocean four")
     print(f"  Correct response: {valid} - {message}")
 
     # Test with new session for wrong response
     session_id = str(uuid.uuid4())
     store_challenge(session_id, "mountain seven")
 
-    valid, message = validate_challenge(session_id, "ocean four")
+    valid, message, intent = validate_challenge(session_id, "ocean four")
     print(f"  Wrong response: {valid} - {message}")
 
     print("✓ Validation flow working\n")
@@ -92,7 +92,7 @@ def test_variation_handling():
     for test_input in test_inputs:
         session_id = str(uuid.uuid4())
         store_challenge(session_id, "ocean four")
-        valid, message = validate_challenge(session_id, test_input)
+        valid, message, intent = validate_challenge(session_id, test_input)
         status = "✓" if valid else "✗"
         print(f"  {status} '{test_input}' → {valid}")
 
@@ -111,7 +111,7 @@ def interactive_test():
     print("Please type what you would say:\n")
 
     user_input = input("> ")
-    valid, message = validate_challenge(session_id, user_input)
+    valid, message, intent = validate_challenge(session_id, user_input)
 
     print(f"\nResult: {message}")
     print(f"Valid: {valid}\n")
