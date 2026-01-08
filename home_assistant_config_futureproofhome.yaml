@@ -1,0 +1,461 @@
+# ============================================================================
+# FutureProof Homes Voice Authentication - Home Assistant Configuration
+# ============================================================================
+#
+# This file contains a complete example configuration for integrating
+# FutureProof Homes Satellite1 devices with the voice authentication system.
+#
+# IMPORTANT: Replace 192.168.1.100 with your orchestrator server's IP address
+#
+# Add these sections to your Home Assistant configuration files:
+# - configuration.yaml: REST commands, input helpers
+# - scripts.yaml: Authentication flow scripts
+# - automations.yaml: Voice intent handlers
+# - scenes.yaml: Protected scenes
+#
+# ============================================================================
+
+# ============================================================================
+# configuration.yaml
+# ============================================================================
+
+# REST Commands for FutureProof Homes Voice Auth
+rest_command:
+  fph_auth_request:
+    url: "http://192.168.1.100:6500/futureproofhome/auth/request"
+    method: POST
+    content_type: "application/json"
+    payload: '{"home_id": "{{ home_id }}", "intent": "{{ intent }}"}'
+
+  fph_auth_verify:
+    url: "http://192.168.1.100:6500/futureproofhome/auth/verify"
+    method: POST
+    content_type: "application/json"
+    payload: '{"home_id": "{{ home_id }}", "response": "{{ response }}"}'
+
+  fph_auth_cancel:
+    url: "http://192.168.1.100:6500/futureproofhome/auth/cancel"
+    method: POST
+    content_type: "application/json"
+    payload: '{"home_id": "{{ home_id }}"}'
+
+# Input Helpers for State Management
+input_text:
+  fph_voice_auth_state:
+    name: FPH Voice Auth State
+    initial: idle
+    max: 50
+
+  fph_voice_auth_challenge:
+    name: FPH Voice Auth Challenge
+    max: 100
+
+  fph_voice_auth_pending_intent:
+    name: FPH Pending Intent
+    max: 50
+
+  fph_voice_auth_home_id:
+    name: FPH Home ID
+    initial: home_1
+    max: 50
+
+input_boolean:
+  fph_voice_auth_enabled:
+    name: Enable FutureProof Homes Voice Auth
+    initial: true
+
+timer:
+  fph_voice_auth_timeout:
+    duration: "00:01:00"
+
+# ============================================================================
+# scripts.yaml
+# ============================================================================
+
+script:
+  # Request authentication for night scene
+  fph_request_night_scene_auth:
+    alias: "FPH Request Night Scene Auth"
+    sequence:
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.fph_voice_auth_state
+        data:
+          value: "requesting"
+
+      - service: rest_command.fph_auth_request
+        data:
+          home_id: "{{ states('input_text.fph_voice_auth_home_id') }}"
+          intent: "night_scene"
+        response_variable: auth_response
+
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.fph_voice_auth_challenge
+        data:
+          value: "{{ auth_response.content.challenge }}"
+
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.fph_voice_auth_pending_intent
+        data:
+          value: "night_scene"
+
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.fph_voice_auth_state
+        data:
+          value: "waiting_for_response"
+
+      - service: timer.start
+        target:
+          entity_id: timer.fph_voice_auth_timeout
+
+      - service: tts.speak
+        target:
+          entity_id: media_player.satellite1_living_room  # Change to your Satellite1 entity
+        data:
+          message: "{{ auth_response.content.speech }}"
+
+  # Verify spoken response
+  fph_verify_voice_response:
+    alias: "FPH Verify Voice Response"
+    fields:
+      response:
+        description: "The user's spoken response"
+        example: "ocean four"
+    sequence:
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.fph_voice_auth_state
+        data:
+          value: "verifying"
+
+      - service: rest_command.fph_auth_verify
+        data:
+          home_id: "{{ states('input_text.fph_voice_auth_home_id') }}"
+          response: "{{ response }}"
+        response_variable: verify_response
+
+      - choose:
+          # If approved
+          - conditions:
+              - condition: template
+                value_template: "{{ verify_response.content.status == 'approved' }}"
+            sequence:
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.fph_voice_auth_state
+                data:
+                  value: "approved"
+
+              - service: timer.cancel
+                target:
+                  entity_id: timer.fph_voice_auth_timeout
+
+              # Execute the protected scene
+              - service: scene.turn_on
+                target:
+                  entity_id: "scene.{{ verify_response.content.intent }}"
+
+              - service: tts.speak
+                target:
+                  entity_id: media_player.satellite1_living_room
+                data:
+                  message: "Voice verified. {{ verify_response.content.intent | replace('_', ' ') | title }} activated."
+
+              - delay: "00:00:02"
+
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.fph_voice_auth_state
+                data:
+                  value: "idle"
+
+        # If denied
+        default:
+          - service: input_text.set_value
+            target:
+              entity_id: input_text.fph_voice_auth_state
+            data:
+              value: "denied"
+
+          - service: tts.speak
+            target:
+              entity_id: media_player.satellite1_living_room
+            data:
+              message: "{{ verify_response.content.speech }}"
+
+          # If terminal failure, cancel timer
+          - condition: template
+            value_template: "{{ verify_response.content.reason in ['no_challenge', 'expired', 'max_attempts'] }}"
+
+          - service: timer.cancel
+            target:
+              entity_id: timer.fph_voice_auth_timeout
+
+          - delay: "00:00:02"
+
+          - service: input_text.set_value
+            target:
+              entity_id: input_text.fph_voice_auth_state
+            data:
+              value: "idle"
+
+  # Cancel authentication
+  fph_cancel_voice_auth:
+    alias: "FPH Cancel Voice Auth"
+    sequence:
+      - service: rest_command.fph_auth_cancel
+        data:
+          home_id: "{{ states('input_text.fph_voice_auth_home_id') }}"
+
+      - service: timer.cancel
+        target:
+          entity_id: timer.fph_voice_auth_timeout
+
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.fph_voice_auth_state
+        data:
+          value: "cancelled"
+
+      - service: tts.speak
+        target:
+          entity_id: media_player.satellite1_living_room
+        data:
+          message: "Security check cancelled."
+
+      - delay: "00:00:02"
+
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.fph_voice_auth_state
+        data:
+          value: "idle"
+
+  # Additional protected intents
+  fph_request_morning_scene_auth:
+    alias: "FPH Request Morning Scene Auth"
+    sequence:
+      - service: script.fph_request_night_scene_auth
+        # Reuse same script but override intent
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.fph_voice_auth_pending_intent
+        data:
+          value: "morning_scene"
+
+  fph_request_lock_all_auth:
+    alias: "FPH Request Lock All Auth"
+    sequence:
+      - service: rest_command.fph_auth_request
+        data:
+          home_id: "{{ states('input_text.fph_voice_auth_home_id') }}"
+          intent: "lock_all"
+        response_variable: auth_response
+
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.fph_voice_auth_pending_intent
+        data:
+          value: "lock_all"
+
+      - service: tts.speak
+        target:
+          entity_id: media_player.satellite1_living_room
+        data:
+          message: "{{ auth_response.content.speech }}"
+
+# ============================================================================
+# automations.yaml
+# ============================================================================
+
+automation:
+  # Night scene intent
+  - id: fph_night_scene_intent
+    alias: "FPH - Night Scene Intent"
+    description: "Trigger voice auth for night scene"
+    trigger:
+      - platform: conversation
+        command:
+          - "night scene"
+          - "bedtime"
+          - "activate night scene"
+          - "good night mode"
+    condition:
+      - condition: state
+        entity_id: input_boolean.fph_voice_auth_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_text.fph_voice_auth_state
+        state: "idle"
+    action:
+      - service: script.fph_request_night_scene_auth
+
+  # Morning scene intent
+  - id: fph_morning_scene_intent
+    alias: "FPH - Morning Scene Intent"
+    description: "Trigger voice auth for morning scene"
+    trigger:
+      - platform: conversation
+        command:
+          - "morning scene"
+          - "good morning"
+          - "wake up mode"
+    condition:
+      - condition: state
+        entity_id: input_boolean.fph_voice_auth_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_text.fph_voice_auth_state
+        state: "idle"
+    action:
+      - service: script.fph_request_morning_scene_auth
+
+  # Lock all doors intent
+  - id: fph_lock_all_intent
+    alias: "FPH - Lock All Intent"
+    description: "Trigger voice auth for locking all doors"
+    trigger:
+      - platform: conversation
+        command:
+          - "lock all doors"
+          - "secure the house"
+          - "lock everything"
+    condition:
+      - condition: state
+        entity_id: input_boolean.fph_voice_auth_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_text.fph_voice_auth_state
+        state: "idle"
+    action:
+      - service: script.fph_request_lock_all_auth
+
+  # Capture challenge response
+  - id: fph_response_capture
+    alias: "FPH - Capture Challenge Response"
+    description: "Capture user's spoken challenge response"
+    trigger:
+      - platform: conversation
+        command:
+          - "{response}"
+    condition:
+      - condition: state
+        entity_id: input_text.fph_voice_auth_state
+        state: "waiting_for_response"
+    action:
+      - service: script.fph_verify_voice_response
+        data:
+          response: "{{ trigger.slots.response }}"
+
+  # Cancel intent
+  - id: fph_cancel_intent
+    alias: "FPH - Cancel Intent"
+    description: "Cancel pending authentication"
+    trigger:
+      - platform: conversation
+        command:
+          - "cancel"
+          - "never mind"
+          - "stop"
+          - "forget it"
+    condition:
+      - condition: state
+        entity_id: input_text.fph_voice_auth_state
+        state: "waiting_for_response"
+    action:
+      - service: script.fph_cancel_voice_auth
+
+  # Help intent
+  - id: fph_help_intent
+    alias: "FPH - Help Intent"
+    description: "Repeat the challenge"
+    trigger:
+      - platform: conversation
+        command:
+          - "help"
+          - "repeat that"
+          - "what was it"
+          - "say it again"
+    condition:
+      - condition: state
+        entity_id: input_text.fph_voice_auth_state
+        state: "waiting_for_response"
+    action:
+      - service: tts.speak
+        target:
+          entity_id: media_player.satellite1_living_room
+        data:
+          message: "Please say: {{ states('input_text.fph_voice_auth_challenge') }}"
+
+  # Authentication timeout
+  - id: fph_timeout
+    alias: "FPH - Authentication Timeout"
+    description: "Handle authentication timeout"
+    trigger:
+      - platform: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.fph_voice_auth_timeout
+    action:
+      - service: script.fph_cancel_voice_auth
+
+# ============================================================================
+# scenes.yaml
+# ============================================================================
+
+scene:
+  # Night scene (protected)
+  - id: night_scene
+    name: Night Mode
+    entities:
+      # Lights
+      light.living_room:
+        state: off
+      light.bedroom:
+        state: on
+        brightness: 10
+      light.hallway:
+        state: on
+        brightness: 5
+
+      # Climate
+      climate.thermostat:
+        temperature: 68
+        hvac_mode: heat
+
+      # Locks
+      lock.front_door:
+        state: locked
+      lock.back_door:
+        state: locked
+
+  # Morning scene
+  - id: morning_scene
+    name: Morning Mode
+    entities:
+      light.bedroom:
+        state: on
+        brightness: 100
+      light.kitchen:
+        state: on
+        brightness: 80
+      climate.thermostat:
+        temperature: 70
+
+  # Lock all (executed as scene for consistency)
+  - id: lock_all
+    name: Lock All Doors
+    entities:
+      lock.front_door:
+        state: locked
+      lock.back_door:
+        state: locked
+      lock.garage_door:
+        state: locked
+
+# ============================================================================
+# End of Configuration
+# ============================================================================

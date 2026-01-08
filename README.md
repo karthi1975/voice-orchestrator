@@ -1,6 +1,11 @@
-# Alexa Voice Authentication for Home Assistant
+# Unified Voice Authentication for Home Assistant
 
-A Python voice authentication system that adds security to Home Assistant scene control via Alexa.
+A Python voice authentication system that adds security to Home Assistant scene control via **Alexa** and **FutureProof Homes Satellite1** devices.
+
+## Supported Voice Assistants
+
+- **Amazon Alexa** - Cloud-based voice control via Alexa Skills
+- **FutureProof Homes Satellite1** - 100% local, privacy-focused voice assistant ([Learn more](https://futureproofhomes.net/))
 
 ## How It Works
 
@@ -16,14 +21,57 @@ A Python voice authentication system that adds security to Home Assistant scene 
 
 ## Features
 
-- Random two-word challenge generation (word + number)
-- Challenge expiry (60 seconds)
-- Maximum attempt limiting (3 attempts)
-- Spoken variation handling ("4" → "four", "for" → "four")
-- Home Assistant webhook integration
-- Simple web dashboard
-- Health check endpoint
+- **Dual integration support**: Alexa and FutureProof Homes Satellite1
+- **Unified authentication**: Both platforms share the same challenge-response logic
+- **Isolated storage**: Separate namespaces for each integration
+- **Random two-word challenge** generation (word + number)
+- **Challenge expiry** (60 seconds)
+- **Maximum attempt limiting** (3 attempts)
+- **Spoken variation handling** ("4" → "four", "for" → "four")
+- **Home Assistant webhook integration**
+- **RESTful API** for FutureProof Homes
+- **Simple web dashboard**
+- **Health check endpoint**
 - **TEST MODE** - Run without Home Assistant for testing
+- **Comprehensive test suite** - 14+ automated tests
+
+## FutureProof Homes Integration
+
+In addition to Alexa, this system supports **FutureProof Homes Satellite1** devices - privacy-focused, local voice assistants that integrate with Home Assistant.
+
+### Quick Start for FutureProof Homes
+
+1. **Start the server**:
+   ```bash
+   ./start.sh
+   ```
+
+2. **Configure Home Assistant** with REST commands (see [home_assistant_config_futureproofhome.yaml](home_assistant_config_futureproofhome.yaml))
+
+3. **Test the API**:
+   ```bash
+   curl -X POST http://localhost:6500/futureproofhome/auth/request \
+     -H "Content-Type: application/json" \
+     -d '{"home_id":"home_1","intent":"night_scene"}'
+   ```
+
+4. **Read the full guide**: [FUTUREPROOFHOME_INTEGRATION.md](FUTUREPROOFHOME_INTEGRATION.md)
+
+### FutureProof Homes Endpoints
+
+- `POST /futureproofhome/auth/request` - Request challenge
+- `POST /futureproofhome/auth/verify` - Verify response
+- `POST /futureproofhome/auth/cancel` - Cancel authentication
+- `GET /futureproofhome/auth/status` - View pending challenges
+
+### Alexa vs FutureProof Homes
+
+| Feature | Alexa | FutureProof Homes |
+|---------|-------|-------------------|
+| Privacy | Cloud | 100% Local |
+| Setup | Alexa Skills Kit | Home Assistant REST |
+| Endpoint | `/alexa` | `/futureproofhome/*` |
+| Storage | Session ID | Home ID |
 
 ## Testing Without Home Assistant
 
