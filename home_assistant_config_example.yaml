@@ -1,0 +1,71 @@
+# Home Assistant Configuration Example
+# Add this to your automations.yaml or create via the UI
+
+# Automation to handle voice authentication webhook
+automation:
+  - alias: "Voice Auth Night Scene"
+    description: "Activates night scene when voice authentication succeeds"
+    trigger:
+      - platform: webhook
+        webhook_id: voice_auth_scene
+    condition:
+      - condition: template
+        value_template: "{{ trigger.json.scene == 'night_scene' }}"
+    action:
+      - service: scene.turn_on
+        target:
+          entity_id: scene.night_mode  # Change this to your actual night scene
+      - service: notify.notify
+        data:
+          message: "Night scene activated via Alexa voice authentication"
+          title: "Voice Auth Success"
+
+  # Optional: Create a morning scene automation
+  - alias: "Voice Auth Morning Scene"
+    description: "Activates morning scene when voice authentication succeeds"
+    trigger:
+      - platform: webhook
+        webhook_id: voice_auth_scene
+    condition:
+      - condition: template
+        value_template: "{{ trigger.json.scene == 'morning_scene' }}"
+    action:
+      - service: scene.turn_on
+        target:
+          entity_id: scene.morning_mode
+      - service: notify.notify
+        data:
+          message: "Morning scene activated via Alexa voice authentication"
+          title: "Voice Auth Success"
+
+# Example night scene
+scene:
+  - name: Night Mode
+    entities:
+      light.living_room:
+        state: off
+      light.bedroom:
+        state: on
+        brightness: 30
+        color_temp: 400
+      switch.tv:
+        state: off
+      lock.front_door:
+        state: locked
+      climate.thermostat:
+        temperature: 68
+
+# Optional: Script to handle voice auth failure
+script:
+  voice_auth_failed:
+    alias: "Voice Authentication Failed"
+    sequence:
+      - service: notify.notify
+        data:
+          message: "Voice authentication failed - someone tried to activate scenes"
+          title: "Security Alert"
+      - service: light.turn_on
+        target:
+          entity_id: light.security_light
+        data:
+          flash: short

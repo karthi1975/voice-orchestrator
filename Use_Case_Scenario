@@ -1,0 +1,25 @@
+
+Sceario 1
+Patient: “Alexa, open home ai”
+Alexa: “Hi! I’m your home AI assistant. How can I help you?”
+Patient: “I’m tired and want to go to bed”
+Alexa: “I’ll help you get ready for bed. Should I dim the lights and lock the doors?”
+Patient: “Yes please”
+Alexa: “Done. Lights dimmed and all doors locked. Want me to adjust the thermostat for sleeping?”
+Patient: “Yes, make it cooler”
+Alexa: “I’ve set it to 68 degrees. Anything else?”
+Patient: “No, that’s all”
+Alexa: “Goodnight! Sleep well.”
+
+Scenario 2
+
+Patient: “Alexa, open home ai”
+Alexa: “Hi! I’m your home AI assistant. How can I help you?”
+Patient: “I heard a noise outside”
+Alexa: “Let me check the cameras… I see a raccoon near your trash cans. Nothing to worry about. Want me to turn on the outside lights to scare it away?”
+Patient: “Yes and make sure all doors are locked”
+Alexa: “Outside lights on. All doors are locked. You’re safe. Should I keep the lights on for a while?”
+Patient: “Yes leave them on for 30 minutes”
+Alexa: “I’ll turn them off in 30 minutes automatically. Anything else?”
+Patient: “No I feel better now thanks”
+Alexa: “Glad I could help. I’m here if you need me.”
