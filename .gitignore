@@ -55,3 +55,15 @@ htmlcov/
 # Temporary files
 *.tmp
 *.temp
+
+# Claude Code configuration
+.claude/
+
+# Markdown files (except important docs)
+*.md
+!README.md
+!SETUP.md
+!QUICK_START.md
+!NGROK_SETUP.md
+!FUTUREPROOFHOME_INTEGRATION.md
+!CHANGES.md
