@@ -25,8 +25,9 @@ app.register_blueprint(futureproofhome_bp, url_prefix='/futureproofhome')
 new_app = create_app()
 
 # Register new routes with /v2 prefix for parallel testing
-app.register_blueprint(new_app.container.alexa_controller.blueprint, url_prefix='/alexa/v2')
-app.register_blueprint(new_app.container.fph_controller.blueprint, url_prefix='/futureproofhome/v2')
+# Use unique names to avoid conflicts with legacy blueprints
+app.register_blueprint(new_app.container.alexa_controller.blueprint, url_prefix='/alexa/v2', name='alexa_v2')
+app.register_blueprint(new_app.container.fph_controller.blueprint, url_prefix='/futureproofhome/v2', name='futureproofhome_v2')
 
 # Store container for potential access
 app.new_container = new_app.container
