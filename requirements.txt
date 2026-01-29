@@ -1,2 +1,9 @@
 flask==3.0.0
 requests==2.31.0
+
+# Database (Phase 7)
+sqlalchemy>=2.0.35  # Python 3.13 compatible
+alembic==1.13.0
+# PostgreSQL driver (install separately if needed)
+# psycopg2-binary==2.9.9  # Use on Linux/production
+# psycopg==3.1.15  # Alternative modern driver

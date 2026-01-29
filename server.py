@@ -7,15 +7,29 @@ import logging
 from config import PORT, DEBUG
 from home_assistant import test_connection
 
-# Import blueprints
+# Import legacy blueprints
 from routes.alexa import alexa_bp
 from routes.futureproofhome import futureproofhome_bp
 
+# Import new SOLID architecture app factory
+from app import create_app
+
 app = Flask(__name__)
 
-# Register blueprints
+# Register legacy blueprints (backward compatibility)
 app.register_blueprint(alexa_bp, url_prefix='/alexa')
 app.register_blueprint(futureproofhome_bp, url_prefix='/futureproofhome')
+
+# Register new SOLID architecture routes (parallel for testing)
+# Create new app with dependency injection
+new_app = create_app()
+
+# Register new routes with /v2 prefix for parallel testing
+app.register_blueprint(new_app.container.alexa_controller.blueprint, url_prefix='/alexa/v2')
+app.register_blueprint(new_app.container.fph_controller.blueprint, url_prefix='/futureproofhome/v2')
+
+# Store container for potential access
+app.new_container = new_app.container
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

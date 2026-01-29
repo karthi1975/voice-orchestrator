@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: voice-orchestrator
+    ports:
+      - "6500:6500"
+    environment:
+      - FLASK_ENV=development
+      - USE_DATABASE=false
+      - TEST_MODE=true
+      - LOG_LEVEL=DEBUG
+      - HA_URL=http://homeassistant.local:8123
+      - HA_WEBHOOK_ID=voice_auth_scene
+    volumes:
+      - ..:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6500/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # PostgreSQL for testing with database
+  postgres:
+    image: postgres:15-alpine
+    container_name: voice-orchestrator-db
+    environment:
+      - POSTGRES_USER=voiceorch
+      - POSTGRES_PASSWORD=devpassword
+      - POSTGRES_DB=voice_orchestrator
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    profiles:
+      - database
+
+volumes:
+  postgres_data:
