@@ -97,26 +97,35 @@ class DependencyContainer:
 
     def _init_infrastructure(self) -> None:
         """Initialize infrastructure layer (external integrations)."""
-        # Home Assistant client
+        from app.infrastructure.home_assistant.client_factory import HomeAssistantClientFactory
+
+        # Legacy single Home Assistant client (backward compatibility)
         self.ha_client = WebhookHomeAssistantClient(
             base_url=self.config['ha_url'],
             webhook_id=self.config['ha_webhook_id'],
             test_mode=self.config.get('test_mode', False)
         )
 
-        logger.info("Infrastructure initialized (HA webhook client)")
+        # Multi-tenant: Home Assistant client factory
+        self.ha_client_factory = HomeAssistantClientFactory(
+            test_mode=self.config.get('test_mode', False)
+        )
+
+        logger.info("Infrastructure initialized (HA webhook client + factory)")
 
     def _init_repositories(self) -> None:
         """Initialize repository layer."""
         from app.config.settings import get_settings
         settings = get_settings()
 
-        # Phase 7: Switch between in-memory and database storage
+        # Multi-tenant: Switch between in-memory and database storage
         if settings.USE_DATABASE and settings.DATABASE_URL:
-            # Use SQLAlchemy repository with PostgreSQL
+            # Use SQLAlchemy repositories with PostgreSQL
             from sqlalchemy import create_engine
             from sqlalchemy.orm import sessionmaker
             from app.repositories.implementations.sqlalchemy_challenge_repo import SQLAlchemyChallengeRepository
+            from app.repositories.implementations.sqlalchemy_user_repo import SQLAlchemyUserRepository
+            from app.repositories.implementations.sqlalchemy_home_repo import SQLAlchemyHomeRepository
             from app.repositories.implementations.sqlalchemy_models import Base
 
             # Create database engine
@@ -134,19 +143,31 @@ class DependencyContainer:
             SessionLocal = sessionmaker(bind=engine)
             self._db_session = SessionLocal()
 
-            # Create repository with session
+            # Create repositories with session
             self.challenge_repository = SQLAlchemyChallengeRepository(self._db_session)
+            self.user_repository = SQLAlchemyUserRepository(self._db_session)
+            self.home_repository = SQLAlchemyHomeRepository(self._db_session)
 
             logger.info("Repositories initialized (SQLAlchemy/PostgreSQL)")
         else:
-            # Use in-memory repository (default)
+            # Use in-memory repositories (default)
+            from app.repositories.implementations.in_memory_user_repo import InMemoryUserRepository
+            from app.repositories.implementations.in_memory_home_repo import InMemoryHomeRepository
+
             self.challenge_repository = InMemoryChallengeRepository()
+            self.user_repository = InMemoryUserRepository()
+            self.home_repository = InMemoryHomeRepository()
             self._db_session = None
 
             logger.info("Repositories initialized (in-memory)")
 
     def _init_services(self) -> None:
         """Initialize service layer."""
+        from app.services.user_service import UserService
+        from app.services.home_service import HomeService
+        from app.config.settings import get_settings
+        settings = get_settings()
+
         # Challenge settings
         self.challenge_settings = ChallengeSettings(
             words=self.config['words'],
@@ -157,6 +178,16 @@ class DependencyContainer:
 
         # Text normalizer
         text_normalizer = TextNormalizer()
+
+        # Multi-tenant: User and Home services
+        self.user_service = UserService(
+            user_repository=self.user_repository
+        )
+
+        self.home_service = HomeService(
+            home_repository=self.home_repository,
+            user_repository=self.user_repository
+        )
 
         # Challenge service (depends on repository)
         self.challenge_service = ChallengeService(
@@ -170,15 +201,25 @@ class DependencyContainer:
             challenge_service=self.challenge_service
         )
 
-        # Home automation service (inject HA client - Phase 5)
-        self.ha_service = HomeAutomationService(
-            ha_client=self.ha_client
-        )
-
-        logger.info("Services initialized with HA client injection")
+        # Home automation service with multi-tenant support
+        if settings.USE_DATABASE:
+            # Multi-tenant mode: use factory and home service
+            self.ha_service = HomeAutomationService(
+                home_service=self.home_service,
+                client_factory=self.ha_client_factory
+            )
+            logger.info("Services initialized (multi-tenant mode)")
+        else:
+            # Legacy mode: use single client
+            self.ha_service = HomeAutomationService(
+                legacy_client=self.ha_client
+            )
+            logger.info("Services initialized (legacy mode)")
 
     def _init_controllers(self) -> None:
         """Initialize controller layer."""
+        from app.controllers.admin_controller import AdminController
+
         # Alexa controller (depends on services)
         self.alexa_controller = AlexaController(
             auth_service=self.auth_service,
@@ -193,7 +234,13 @@ class DependencyContainer:
             url_prefix='/futureproofhome'  # Will be registered as /futureproofhome/v2
         )
 
-        logger.info("Controllers initialized")
+        # Admin controller for multi-tenant management
+        self.admin_controller = AdminController(
+            user_service=self.user_service,
+            home_service=self.home_service
+        )
+
+        logger.info("Controllers initialized (Alexa, FPH, Admin)")
 
 
 def create_app(config: Optional[dict] = None) -> Flask:
@@ -236,6 +283,7 @@ def create_app(config: Optional[dict] = None) -> Flask:
     # Register blueprints from controllers
     app.register_blueprint(container.alexa_controller.blueprint)
     app.register_blueprint(container.fph_controller.blueprint)
+    app.register_blueprint(container.admin_controller.blueprint)
 
     # Configure logging
     logging.basicConfig(
