@@ -132,9 +132,24 @@ class SQLAlchemyChallengeRepository(IChallengeRepository):
         
         return challenge
     
-    def delete(self, challenge: Challenge) -> bool:
-        """Delete a challenge."""
-        return self.delete_by_identifier(challenge.identifier, challenge.client_type)
+    def delete(self, entity_id: str) -> bool:
+        """
+        Delete a challenge by entity ID.
+
+        Args:
+            entity_id: Challenge ID (format: identifier_clienttype)
+
+        Returns:
+            True if challenge was found and deleted, False otherwise
+        """
+        model = self._session.get(ChallengeModel, entity_id)
+
+        if model:
+            self._session.delete(model)
+            self._session.commit()
+            return True
+
+        return False
     
     def delete_by_identifier(
         self,
@@ -166,6 +181,19 @@ class SQLAlchemyChallengeRepository(IChallengeRepository):
         models = self._session.scalars(stmt).all()
         return [self._to_domain(model) for model in models]
     
+    def exists(self, entity_id: str) -> bool:
+        """
+        Check if challenge exists by entity ID.
+
+        Args:
+            entity_id: Challenge ID (format: identifier_clienttype)
+
+        Returns:
+            True if challenge exists, False otherwise
+        """
+        model = self._session.get(ChallengeModel, entity_id)
+        return model is not None
+
     def exists_for_identifier(
         self,
         identifier: str,
@@ -175,7 +203,7 @@ class SQLAlchemyChallengeRepository(IChallengeRepository):
         model_id = f"{identifier}_{client_type.value}"
         model = self._session.get(ChallengeModel, model_id)
         return model is not None
-    
+
     def delete_expired(self, before: datetime) -> int:
         """Delete expired challenges."""
         stmt = delete(ChallengeModel).where(
