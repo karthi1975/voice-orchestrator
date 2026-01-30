@@ -66,9 +66,12 @@ def sample_home(fixed_datetime):
     """Sample home for testing."""
     return Home(
         home_id="home_1",
+        user_id="user_123",
         name="Test Home",
-        created_at=fixed_datetime,
-        is_active=True
+        ha_url="https://ha1.homeadapt.us",
+        ha_webhook_id="voice_auth_scene",
+        is_active=True,
+        created_at=fixed_datetime
     )
 
 

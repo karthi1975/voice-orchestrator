@@ -25,6 +25,7 @@ class Challenge:
         client_type: Type of client requesting authentication
         status: Current status of the challenge
         created_at: When the challenge was created
+        home_id: Optional home identifier for multi-tenant isolation
         attempts: Number of validation attempts made
         intent: Optional intent to execute after successful validation
         expires_at: When the challenge expires (auto-calculated if not provided)
@@ -34,6 +35,7 @@ class Challenge:
     client_type: ClientType
     status: ChallengeStatus
     created_at: datetime
+    home_id: Optional[str] = None
     attempts: int = 0
     intent: Optional[str] = None
     expires_at: Optional[datetime] = None
@@ -77,23 +79,54 @@ class Challenge:
 
 
 @dataclass
+class User:
+    """
+    User entity for multi-tenant support.
+
+    Represents a user who owns one or more homes.
+
+    Attributes:
+        user_id: Unique user identifier (UUID)
+        username: Unique username
+        email: Optional email address
+        full_name: User's full name
+        is_active: Whether the user account is active
+        created_at: When the user was created
+    """
+    user_id: str
+    username: str
+    full_name: str
+    is_active: bool = True
+    created_at: datetime = field(default_factory=datetime.now)
+    email: Optional[str] = None
+
+
+@dataclass
 class Home:
     """
     Home entity for multi-tenant support.
 
-    Represents a physical home with multiple users and voice devices.
-    Future enhancement for Phase 7+ multi-tenancy.
+    Represents a physical home with its own Home Assistant instance.
+    Each home belongs to a user and has its own HA URL and webhook configuration.
 
     Attributes:
-        home_id: Unique home identifier
-        name: Human-readable home name
-        created_at: When the home was registered
+        home_id: Unique home identifier (e.g., "home_1", "beach_house")
+        user_id: Owner user ID (foreign key to User)
+        name: Human-readable home name (e.g., "Main House")
+        ha_url: Home Assistant URL for this home (e.g., "https://ha1.homeadapt.us")
+        ha_webhook_id: Webhook ID for voice authentication (e.g., "voice_auth_scene")
         is_active: Whether the home is currently active
+        created_at: When the home was registered
+        updated_at: When the home configuration was last updated
     """
     home_id: str
+    user_id: str
     name: str
-    created_at: datetime
+    ha_url: str
+    ha_webhook_id: str
     is_active: bool = True
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: Optional[datetime] = None
 
 
 @dataclass

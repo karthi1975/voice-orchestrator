@@ -153,9 +153,12 @@ class TestHome:
         """Test creating an inactive home."""
         home = Home(
             home_id="home_2",
+            user_id="user_456",
             name="Inactive Home",
-            created_at=fixed_datetime,
-            is_active=False
+            ha_url="https://ha2.homeadapt.us",
+            ha_webhook_id="webhook_2",
+            is_active=False,
+            created_at=fixed_datetime
         )
         assert home.is_active is False
 
