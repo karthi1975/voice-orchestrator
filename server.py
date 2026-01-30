@@ -28,6 +28,7 @@ new_app = create_app()
 # Use unique names to avoid conflicts with legacy blueprints
 app.register_blueprint(new_app.container.alexa_controller.blueprint, url_prefix='/alexa/v2', name='alexa_v2')
 app.register_blueprint(new_app.container.fph_controller.blueprint, url_prefix='/futureproofhome/v2', name='futureproofhome_v2')
+app.register_blueprint(new_app.container.admin_controller.blueprint, url_prefix='/admin', name='admin')
 
 # Store container for potential access
 app.new_container = new_app.container
