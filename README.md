@@ -21,6 +21,8 @@ A Python voice authentication system that adds security to Home Assistant scene 
 
 ## Features
 
+- **Multi-Tenant Support** 🆕 - Support multiple users, each with their own Home Assistant instance
+- **Admin API** 🆕 - REST API for user and home enrollment
 - **Dual integration support**: Alexa and FutureProof Homes Satellite1
 - **Unified authentication**: Both platforms share the same challenge-response logic
 - **Isolated storage**: Separate namespaces for each integration
@@ -33,7 +35,101 @@ A Python voice authentication system that adds security to Home Assistant scene 
 - **Simple web dashboard**
 - **Health check endpoint**
 - **TEST MODE** - Run without Home Assistant for testing
-- **Comprehensive test suite** - 14+ automated tests
+- **Comprehensive test suite** - 186+ automated tests
+- **SOLID architecture** - Clean separation of concerns
+- **PostgreSQL support** - Scalable database backend
+
+## Multi-Tenant Architecture 🆕
+
+Voice Orchestrator now supports **multiple users, each with their own Home Assistant instance**:
+
+### Key Capabilities
+
+- **User Management**: Create and manage multiple user accounts
+- **Home Registration**: Each user can have one or more homes
+- **Dynamic HA Routing**: Scene triggers automatically route to the correct Home Assistant instance
+- **Data Isolation**: Challenges are isolated per home for security
+- **Admin API**: RESTful endpoints for enrollment and management
+
+### Quick Start - Multi-Tenant
+
+1. **Enable database mode** in `.env`:
+   ```bash
+   USE_DATABASE=true
+   DATABASE_URL=postgresql://user:password@localhost:5432/voice_orchestrator
+   ```
+
+2. **Run database migrations**:
+   ```bash
+   alembic upgrade head
+   ```
+
+3. **Create a user**:
+   ```bash
+   curl -X POST http://localhost:6500/admin/users \
+     -H "Content-Type: application/json" \
+     -d '{
+       "username": "becca",
+       "full_name": "Becca Smith",
+       "email": "becca@example.com"
+     }'
+   ```
+
+4. **Register their home**:
+   ```bash
+   curl -X POST http://localhost:6500/admin/homes \
+     -H "Content-Type: application/json" \
+     -d '{
+       "home_id": "becca_main",
+       "user_id": "<user_id_from_step_3>",
+       "name": "Becca'\''s Main House",
+       "ha_url": "https://becca-ha.homeadapt.us",
+       "ha_webhook_id": "voice_auth_scene"
+     }'
+   ```
+
+5. **Use FutureProof Homes** with the home_id:
+   ```bash
+   curl -X POST http://localhost:6500/futureproofhome/v2/auth/request \
+     -H "Content-Type: application/json" \
+     -d '{"home_id":"becca_main","intent":"night_scene"}'
+   ```
+
+See [docs/ADMIN_API.md](docs/ADMIN_API.md) for complete API documentation.
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Voice Orchestrator                      │
+├─────────────────────────────────────────────────────────────┤
+│  Controllers                                                │
+│  ├─ Alexa Controller      (/alexa/*)                       │
+│  ├─ FPH Controller        (/futureproofhome/*)             │
+│  └─ Admin Controller      (/admin/*)                       │
+├─────────────────────────────────────────────────────────────┤
+│  Services                                                   │
+│  ├─ UserService           (user management)                │
+│  ├─ HomeService           (home registration)              │
+│  ├─ ChallengeService      (challenge generation)           │
+│  ├─ AuthenticationService (validation)                     │
+│  └─ HomeAutomationService (multi-tenant routing)           │
+├─────────────────────────────────────────────────────────────┤
+│  Infrastructure                                             │
+│  └─ HA Client Factory     (one client per home)            │
+├─────────────────────────────────────────────────────────────┤
+│  Repositories (Data Layer)                                  │
+│  ├─ User Repository       (PostgreSQL / In-Memory)         │
+│  ├─ Home Repository       (PostgreSQL / In-Memory)         │
+│  └─ Challenge Repository  (PostgreSQL / In-Memory)         │
+└─────────────────────────────────────────────────────────────┘
+            │                │                │
+            ▼                ▼                ▼
+   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+   │ HA Instance 1│  │ HA Instance 2│  │ HA Instance N│
+   │ User: Becca  │  │ User: John   │  │ User: ...    │
+   └──────────────┘  └──────────────┘  └──────────────┘
+```
 
 ## FutureProof Homes Integration
 
