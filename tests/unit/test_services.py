@@ -440,13 +440,12 @@ class TestHomeAutomationService:
 
     def test_trigger_scene_via_legacy(self):
         """Test triggering scene via legacy module."""
-        service = HomeAutomationService(ha_client=None)
+        service = HomeAutomationService()
 
         with patch('home_assistant.trigger_scene') as mock_trigger:
             mock_trigger.return_value = (True, "Scene activated")
 
-            request = SceneTriggerRequest(scene_id="night_scene")
-            result = service.trigger_scene(request)
+            result = service.trigger_scene(scene_id="night_scene")
 
         assert result.success is True
         assert result.scene_id == "night_scene"
@@ -463,10 +462,9 @@ class TestHomeAutomationService:
             scene_id='night_scene'
         )
 
-        service = HomeAutomationService(ha_client=mock_client)
+        service = HomeAutomationService(legacy_client=mock_client)
 
-        request = SceneTriggerRequest(scene_id="night_scene", source="Test")
-        result = service.trigger_scene(request)
+        result = service.trigger_scene(scene_id="night_scene", source="Test")
 
         assert result.success is True
         mock_client.trigger_scene.assert_called_once_with(
@@ -476,7 +474,7 @@ class TestHomeAutomationService:
 
     def test_test_connection_via_legacy(self):
         """Test connection test via legacy module."""
-        service = HomeAutomationService(ha_client=None)
+        service = HomeAutomationService()
 
         with patch('home_assistant.test_connection') as mock_test:
             mock_test.return_value = (True, "Connected")
@@ -496,7 +494,7 @@ class TestHomeAutomationService:
             message="Connected"
         )
 
-        service = HomeAutomationService(ha_client=mock_client)
+        service = HomeAutomationService(legacy_client=mock_client)
 
         success, message = service.test_connection()
 
