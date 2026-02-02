@@ -64,6 +64,7 @@ class HomeModel(Base):
     ha_url: Mapped[str] = mapped_column(String(500), nullable=False)
     ha_webhook_id: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    test_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
