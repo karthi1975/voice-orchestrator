@@ -116,6 +116,7 @@ class Home:
         ha_url: Home Assistant URL for this home (e.g., "https://ha1.homeadapt.us")
         ha_webhook_id: Webhook ID for voice authentication (e.g., "voice_auth_scene")
         is_active: Whether the home is currently active
+        test_mode: If True, skip Home Assistant integration (for testing)
         created_at: When the home was registered
         updated_at: When the home configuration was last updated
     """
@@ -125,6 +126,7 @@ class Home:
     ha_url: str
     ha_webhook_id: str
     is_active: bool = True
+    test_mode: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: Optional[datetime] = None
 

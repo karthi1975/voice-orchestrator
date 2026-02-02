@@ -126,6 +126,12 @@ class AdminController(BaseController):
             self.get_user_homes,
             methods=['GET']
         )
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/test-mode',
+            'toggle_test_mode',
+            self.toggle_test_mode,
+            methods=['POST']
+        )
 
     # ========== User Endpoints ==========
 
@@ -429,3 +435,37 @@ class AdminController(BaseController):
 
         response = HomeListResponse.from_models(homes)
         return self.json_response(response.to_dict(), 200)
+
+    def toggle_test_mode(self, home_id: str) -> Tuple[Any, int]:
+        """
+        POST /admin/homes/{home_id}/test-mode - Toggle test mode for a home.
+
+        Request body:
+            {
+                "enabled": true  # true to enable test mode, false to disable
+            }
+
+        Returns:
+            200: Test mode toggled successfully
+            404: Home not found
+            400: Validation error
+        """
+        self.log_request(f'toggle_test_mode:{home_id}')
+
+        try:
+            data = self.get_request_json()
+            enabled = data.get('enabled', True)
+
+            # Update home's test_mode
+            home = self._home_service.update_home(
+                home_id=home_id,
+                test_mode=enabled
+            )
+
+            response = HomeResponse.from_model(home)
+            logger.info(f"Test mode {'enabled' if enabled else 'disabled'} for home: {home_id}")
+            return self.json_response(response.to_dict(), 200)
+
+        except ValueError as e:
+            logger.warning(f"Failed to toggle test mode for {home_id}: {str(e)}")
+            return self.error_response(str(e), 404)

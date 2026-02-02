@@ -1,56 +1,58 @@
-{
-  "interactionModel": {
-    "languageModel": {
-      "invocationName": "home security",
-      "intents": [
-        {
-          "name": "NightSceneIntent",
-          "slots": [],
-          "samples": [
-            "night scene",
-            "activate night scene",
-            "turn on night scene",
-            "bedtime",
-            "bedtime mode",
-            "activate bedtime",
-            "start night mode",
-            "night mode"
-          ]
-        },
-        {
-          "name": "ChallengeResponseIntent",
-          "slots": [
-            {
-              "name": "response",
-              "type": "AMAZON.SearchQuery"
-            }
-          ],
-          "samples": [
-            "{response}"
-          ]
-        },
-        {
-          "name": "AMAZON.CancelIntent",
-          "samples": []
-        },
-        {
-          "name": "AMAZON.HelpIntent",
-          "samples": []
-        },
-        {
-          "name": "AMAZON.StopIntent",
-          "samples": []
-        },
-        {
-          "name": "AMAZON.FallbackIntent",
-          "samples": []
-        },
-        {
-          "name": "AMAZON.NavigateHomeIntent",
-          "samples": []
-        }
-      ],
-      "types": []
-    }
-  }
-}
+{                                                                                                                                                                                                                     
+    "interactionModel": {                                                                                                                                                                                               
+      "languageModel": {                                                                                                                                                                                                
+        "invocationName": "voice guardian",                                                                                                                                                                             
+        "intents": [                                                                                                                                                                                                    
+          {                                                                                                                                                                                                             
+            "name": "NightSceneIntent",                                                                                                                                                                                 
+            "slots": [],                                                                                                                                                                                                
+            "samples": [                                                                                                                                                                                                
+              "night scene",                                                                                                                                                                                            
+              "activate night scene",                                                                                                                                                                                   
+              "turn on night scene",                                                                                                                                                                                    
+              "bedtime",                                                                                                                                                                                                
+              "bedtime mode",                                                                                                                                                                                           
+              "activate bedtime",                                                                                                                                                                                       
+              "start night mode",                                                                                                                                                                                       
+              "night mode"                                                                                                                                                                                              
+            ]                                                                                                                                                                                                           
+          },                                                                                                                                                                                                            
+          {                                                                                                                                                                                                             
+            "name": "ChallengeResponseIntent",                                                                                                                                                                          
+            "slots": [                                                                                                                                                                                                  
+              {                                                                                                                                                                                                         
+                "name": "response",                                                                                                                                                                                     
+                "type": "AMAZON.SearchQuery"                                                                                                                                                                            
+              }                                                                                                                                                                                                         
+            ],                                                                                                                                                                                                          
+            "samples": [                                                                                                                                                                                                
+              "the phrase is {response}",                                                                                                                                                                               
+              "my response is {response}",                                                                                                                                                                              
+              "I say {response}"                                                                                                                                                                                        
+            ]                                                                                                                                                                                                           
+          },                                                                                                                                                                                                            
+          {                                                                                                                                                                                                             
+            "name": "AMAZON.CancelIntent",                                                                                                                                                                              
+            "samples": []                                                                                                                                                                                               
+          },                                                                                                                                                                                                            
+          {                                                                                                                                                                                                             
+            "name": "AMAZON.HelpIntent",                                                                                                                                                                                
+            "samples": []                                                                                                                                                                                               
+          },                                                                                                                                                                                                            
+          {                                                                                                                                                                                                             
+            "name": "AMAZON.StopIntent",                                                                                                                                                                                
+            "samples": []                                                                                                                                                                                               
+          },                                                                                                                                                                                                            
+          {                                                                                                                                                                                                             
+            "name": "AMAZON.FallbackIntent",                                                                                                                                                                            
+            "samples": []                                                                                                                                                                                               
+          },                                                                                                                                                                                                            
+          {                                                                                                                                                                                                             
+            "name": "AMAZON.NavigateHomeIntent",                                                                                                                                                                        
+            "samples": []                                                                                                                                                                                               
+          }                                                                                                                                                                                                             
+        ],                                                                                                                                                                                                              
+        "types": []                                                                                                                                                                                                     
+      }                                                                                                                                                                                                                 
+    }                                                                                                                                                                                                                   
+  }                                 

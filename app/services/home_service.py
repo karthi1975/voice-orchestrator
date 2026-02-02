@@ -134,7 +134,8 @@ class HomeService:
         home_id: str,
         name: Optional[str] = None,
         ha_url: Optional[str] = None,
-        ha_webhook_id: Optional[str] = None
+        ha_webhook_id: Optional[str] = None,
+        test_mode: Optional[bool] = None
     ) -> Home:
         """
         Update home details.
@@ -144,6 +145,7 @@ class HomeService:
             name: New name (optional)
             ha_url: New HA URL (optional)
             ha_webhook_id: New webhook ID (optional)
+            test_mode: Test mode flag (optional) - skips HA integration if True
 
         Returns:
             Updated home
@@ -162,6 +164,7 @@ class HomeService:
             ha_url=ha_url if ha_url is not None else home.ha_url,
             ha_webhook_id=ha_webhook_id if ha_webhook_id is not None else home.ha_webhook_id,
             is_active=home.is_active,
+            test_mode=test_mode if test_mode is not None else home.test_mode,
             created_at=home.created_at,
             updated_at=datetime.now()
         )

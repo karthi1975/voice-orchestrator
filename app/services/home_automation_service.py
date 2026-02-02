@@ -130,6 +130,17 @@ class HomeAutomationService:
             SceneTriggerResult
         """
         try:
+            # Get home to check test_mode
+            home = self._home_service.get_home(home_id)
+
+            # If in test mode, skip HA and return success
+            if home.test_mode:
+                return SceneTriggerResult(
+                    success=True,
+                    message=f"[TEST MODE] Scene '{scene_id}' triggered successfully (Home Assistant skipped)",
+                    scene_id=scene_id
+                )
+
             # Get home HA configuration
             ha_url, ha_webhook_id = self._home_service.get_ha_config(home_id)
 
