@@ -2,7 +2,7 @@
 Flask server for Alexa Voice Authentication System
 """
 
-from flask import Flask, render_template_string, jsonify
+from flask import Flask, render_template_string, jsonify, send_from_directory
 import logging
 from config import PORT, DEBUG
 from home_assistant import test_connection
@@ -152,6 +152,14 @@ def health_check():
             'message': ha_message
         }
     })
+
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Serve static files (privacy policy, terms of use, etc.)"""
+    import os
+    static_dir = os.path.join(os.path.dirname(__file__), 'static')
+    return send_from_directory(static_dir, filename)
 
 
 if __name__ == '__main__':
