@@ -11,8 +11,8 @@ from home_assistant import test_connection
 from routes.alexa import alexa_bp
 from routes.futureproofhome import futureproofhome_bp
 
-# Import new SOLID architecture app factory
-from app import create_app
+# Import new SOLID architecture dependency container
+from app import DependencyContainer
 
 app = Flask(__name__)
 
@@ -21,17 +21,17 @@ app.register_blueprint(alexa_bp, url_prefix='/alexa')
 app.register_blueprint(futureproofhome_bp, url_prefix='/futureproofhome')
 
 # Register new SOLID architecture routes (parallel for testing)
-# Create new app with dependency injection
-new_app = create_app()
+# Create dependency container (without Flask app - we'll register to main app)
+container = DependencyContainer()
 
 # Register new routes with /v2 prefix for parallel testing
 # Use unique names to avoid conflicts with legacy blueprints
-app.register_blueprint(new_app.container.alexa_controller.blueprint, url_prefix='/alexa/v2', name='alexa_v2')
-app.register_blueprint(new_app.container.fph_controller.blueprint, url_prefix='/futureproofhome/v2', name='futureproofhome_v2')
-app.register_blueprint(new_app.container.admin_controller.blueprint, name='admin')
+app.register_blueprint(container.alexa_controller.blueprint, url_prefix='/alexa/v2', name='alexa_v2')
+app.register_blueprint(container.fph_controller.blueprint, url_prefix='/futureproofhome/v2', name='futureproofhome_v2')
+app.register_blueprint(container.admin_controller.blueprint, name='admin')
 
 # Store container for potential access
-app.new_container = new_app.container
+app.container = container
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
