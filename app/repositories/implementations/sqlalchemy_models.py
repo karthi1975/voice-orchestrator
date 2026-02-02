@@ -80,6 +80,34 @@ class HomeModel(Base):
         return f"<HomeModel(home_id={self.home_id}, name={self.name})>"
 
 
+class AlexaUserMappingModel(Base):
+    """
+    SQLAlchemy model for Alexa User to Home mapping.
+
+    Maps Alexa user IDs to home IDs for multi-tenant support.
+    """
+    __tablename__ = 'alexa_user_mappings'
+
+    # Primary key
+    alexa_user_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+    # Foreign key to home
+    home_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey('homes.home_id'),
+        nullable=False,
+        index=True
+    )
+
+    # Metadata
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        """String representation."""
+        return f"<AlexaUserMappingModel(alexa_user_id={self.alexa_user_id}, home_id={self.home_id})>"
+
+
 class ChallengeModel(Base):
     """
     SQLAlchemy model for Challenge entity.

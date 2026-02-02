@@ -177,11 +177,19 @@ class AlexaController(BaseController):
 
         if result.is_valid:
             # Trigger Home Assistant scene
-            # TODO: Map alexa_request.user_id to home_id from database
-            # For now, use default home from environment or first home
+            # Map alexa_user_id to home_id from database
+            home_id = self._get_home_id_for_alexa_user(alexa_request.user_id)
+
+            if not home_id:
+                logger.error(f"No home mapping found for Alexa user: {alexa_request.user_id}")
+                return AlexaResponse(
+                    speech_text="Your Alexa account is not linked to a home. Please contact support.",
+                    should_end_session=True
+                )
+
             scene_result = self.ha_service.trigger_scene(
                 scene_id='night_scene',
-                home_id='karthi_test_home',  # Default for testing
+                home_id=home_id,
                 source='Alexa Voice Authentication'
             )
 
@@ -201,3 +209,32 @@ class AlexaController(BaseController):
                 speech_text=speech,
                 should_end_session=False
             )
+
+    def _get_home_id_for_alexa_user(self, alexa_user_id: str) -> str:
+        """
+        Get home_id for an Alexa user from database.
+
+        Args:
+            alexa_user_id: Amazon user ID from Alexa request
+
+        Returns:
+            home_id or None if not found
+        """
+        try:
+            from app.repositories.implementations.sqlalchemy_models import AlexaUserMappingModel
+            from app.config.database import get_db_session
+
+            session = next(get_db_session())
+            mapping = session.query(AlexaUserMappingModel).filter_by(
+                alexa_user_id=alexa_user_id
+            ).first()
+
+            if mapping:
+                return mapping.home_id
+            else:
+                logger.warning(f"No home mapping found for Alexa user: {alexa_user_id}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error looking up home for Alexa user {alexa_user_id}: {str(e)}")
+            return None
