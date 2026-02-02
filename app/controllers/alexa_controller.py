@@ -179,13 +179,11 @@ class AlexaController(BaseController):
             # Trigger Home Assistant scene
             # TODO: Map alexa_request.user_id to home_id from database
             # For now, use default home from environment or first home
-            scene_request = SceneTriggerRequest(
+            scene_result = self.ha_service.trigger_scene(
                 scene_id='night_scene',
                 home_id='karthi_test_home',  # Default for testing
                 source='Alexa Voice Authentication'
             )
-
-            scene_result = self.ha_service.trigger_scene(scene_request)
 
             if scene_result.success:
                 speech = "Voice verified. Night scene activated."
