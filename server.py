@@ -28,7 +28,7 @@ container = DependencyContainer()
 # Use unique names to avoid conflicts with legacy blueprints
 app.register_blueprint(container.alexa_controller.blueprint, url_prefix='/alexa/v2', name='alexa_v2')
 app.register_blueprint(container.fph_controller.blueprint, url_prefix='/futureproofhome/v2', name='futureproofhome_v2')
-app.register_blueprint(container.admin_controller.blueprint, name='admin')
+app.register_blueprint(container.admin_controller.blueprint)
 
 # Store container for potential access
 app.container = container
