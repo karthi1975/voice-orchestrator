@@ -48,6 +48,7 @@ class SQLAlchemyHomeRepository(IHomeRepository):
             ha_url=model.ha_url,
             ha_webhook_id=model.ha_webhook_id,
             is_active=model.is_active,
+            test_mode=model.test_mode,
             created_at=model.created_at,
             updated_at=model.updated_at
         )
@@ -69,6 +70,7 @@ class SQLAlchemyHomeRepository(IHomeRepository):
             ha_url=home.ha_url,
             ha_webhook_id=home.ha_webhook_id,
             is_active=home.is_active,
+            test_mode=home.test_mode,
             created_at=home.created_at,
             updated_at=home.updated_at
         )
@@ -114,6 +116,7 @@ class SQLAlchemyHomeRepository(IHomeRepository):
         model.ha_url = home.ha_url
         model.ha_webhook_id = home.ha_webhook_id
         model.is_active = home.is_active
+        model.test_mode = home.test_mode
         model.updated_at = datetime.now()
 
         self._session.commit()
