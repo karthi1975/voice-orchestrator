@@ -87,6 +87,7 @@ class HomeResponse(BaseDTO):
         ha_url: Home Assistant URL
         ha_webhook_id: HA webhook ID
         is_active: Active status
+        test_mode: Test mode flag (skips HA integration if True)
         created_at: Creation timestamp
         updated_at: Last update timestamp
     """
@@ -96,6 +97,7 @@ class HomeResponse(BaseDTO):
     ha_url: str
     ha_webhook_id: str
     is_active: bool
+    test_mode: bool
     created_at: str
     updated_at: Optional[str]
 
@@ -117,6 +119,7 @@ class HomeResponse(BaseDTO):
             ha_url=home.ha_url,
             ha_webhook_id=home.ha_webhook_id,
             is_active=home.is_active,
+            test_mode=home.test_mode,
             created_at=home.created_at.isoformat(),
             updated_at=home.updated_at.isoformat() if home.updated_at else None
         )
@@ -130,6 +133,7 @@ class HomeResponse(BaseDTO):
             'ha_url': self.ha_url,
             'ha_webhook_id': self.ha_webhook_id,
             'is_active': self.is_active,
+            'test_mode': self.test_mode,
             'created_at': self.created_at
         }
         if self.updated_at:
@@ -146,6 +150,7 @@ class HomeResponse(BaseDTO):
             ha_url=data['ha_url'],
             ha_webhook_id=data['ha_webhook_id'],
             is_active=data['is_active'],
+            test_mode=data.get('test_mode', False),
             created_at=data['created_at'],
             updated_at=data.get('updated_at')
         )
