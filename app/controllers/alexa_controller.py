@@ -214,6 +214,9 @@ class AlexaController(BaseController):
         """
         Get home_id for an Alexa user from database.
 
+        If the Alexa user is not mapped, logs a warning with the full user ID
+        so admins can create the mapping.
+
         Args:
             alexa_user_id: Amazon user ID from Alexa request
 
@@ -221,8 +224,9 @@ class AlexaController(BaseController):
             home_id or None if not found
         """
         try:
-            from app.repositories.implementations.sqlalchemy_models import AlexaUserMappingModel
             from app.config.settings import get_settings
+            from app.services.alexa_mapping_service import AlexaMappingService
+            from app.repositories.implementations.sqlalchemy_alexa_mapping_repo import SQLAlchemyAlexaMappingRepository
             from sqlalchemy import create_engine
             from sqlalchemy.orm import sessionmaker
 
@@ -232,18 +236,25 @@ class AlexaController(BaseController):
             session = SessionLocal()
 
             try:
-                mapping = session.query(AlexaUserMappingModel).filter_by(
-                    alexa_user_id=alexa_user_id
-                ).first()
+                # Use repository to look up mapping
+                mapping_repo = SQLAlchemyAlexaMappingRepository(session)
+                mapping = mapping_repo.get_by_alexa_user_id(alexa_user_id)
 
                 if mapping:
+                    logger.info(f"Found home mapping: {alexa_user_id[:20]}... -> {mapping.home_id}")
                     return mapping.home_id
                 else:
-                    logger.warning(f"No home mapping found for Alexa user: {alexa_user_id}")
+                    # Log unmapped user for admin to create mapping
+                    logger.warning(
+                        f"UNMAPPED ALEXA USER - Add this to database:\n"
+                        f"  Alexa User ID: {alexa_user_id}\n"
+                        f"  Use admin API: POST /admin/alexa-mappings\n"
+                        f"  Body: {{\"alexa_user_id\": \"{alexa_user_id}\", \"home_id\": \"YOUR_HOME_ID\"}}"
+                    )
                     return None
             finally:
                 session.close()
 
         except Exception as e:
-            logger.error(f"Error looking up home for Alexa user {alexa_user_id}: {str(e)}", exc_info=True)
+            logger.error(f"Error looking up home for Alexa user: {str(e)}", exc_info=True)
             return None

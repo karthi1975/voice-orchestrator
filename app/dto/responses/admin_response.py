@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from datetime import datetime
 from app.dto.base import BaseDTO
-from app.domain.models import User, Home
+from app.domain.models import User, Home, AlexaUserMapping
 
 
 @dataclass
@@ -240,6 +240,106 @@ class HomeListResponse(BaseDTO):
         """Create from dictionary (not typically used for responses)."""
         return cls(
             homes=[HomeResponse.from_dict(h) for h in data['homes']],
+            total=data['total']
+        )
+
+
+@dataclass
+class AlexaMappingResponse(BaseDTO):
+    """
+    Response containing Alexa user mapping data.
+
+    Attributes:
+        alexa_user_id: Amazon user ID
+        home_id: Mapped home ID
+        created_at: Creation timestamp
+        updated_at: Last update timestamp
+    """
+    alexa_user_id: str
+    home_id: str
+    created_at: str
+    updated_at: Optional[str]
+
+    @classmethod
+    def from_model(cls, mapping: AlexaUserMapping) -> 'AlexaMappingResponse':
+        """
+        Create response from AlexaUserMapping domain model.
+
+        Args:
+            mapping: AlexaUserMapping domain model
+
+        Returns:
+            AlexaMappingResponse
+        """
+        return cls(
+            alexa_user_id=mapping.alexa_user_id,
+            home_id=mapping.home_id,
+            created_at=mapping.created_at.isoformat(),
+            updated_at=mapping.updated_at.isoformat() if mapping.updated_at else None
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        result = {
+            'alexa_user_id': self.alexa_user_id,
+            'home_id': self.home_id,
+            'created_at': self.created_at
+        }
+        if self.updated_at:
+            result['updated_at'] = self.updated_at
+        return result
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'AlexaMappingResponse':
+        """Create from dictionary."""
+        return cls(
+            alexa_user_id=data['alexa_user_id'],
+            home_id=data['home_id'],
+            created_at=data['created_at'],
+            updated_at=data.get('updated_at')
+        )
+
+
+@dataclass
+class AlexaMappingListResponse(BaseDTO):
+    """
+    Response containing list of Alexa user mappings.
+
+    Attributes:
+        mappings: List of mapping responses
+        total: Total count
+    """
+    mappings: List[AlexaMappingResponse]
+    total: int
+
+    @classmethod
+    def from_models(cls, mappings: List[AlexaUserMapping]) -> 'AlexaMappingListResponse':
+        """
+        Create response from list of AlexaUserMapping models.
+
+        Args:
+            mappings: List of AlexaUserMapping domain models
+
+        Returns:
+            AlexaMappingListResponse
+        """
+        return cls(
+            mappings=[AlexaMappingResponse.from_model(m) for m in mappings],
+            total=len(mappings)
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'mappings': [m.to_dict() for m in self.mappings],
+            'total': self.total
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'AlexaMappingListResponse':
+        """Create from dictionary."""
+        return cls(
+            mappings=[AlexaMappingResponse.from_dict(m) for m in data['mappings']],
             total=data['total']
         )
 

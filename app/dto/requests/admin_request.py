@@ -178,3 +178,67 @@ class UpdateHomeRequest(BaseDTO):
         if self.is_active is not None:
             result['is_active'] = self.is_active
         return result
+
+
+@dataclass
+class CreateAlexaMappingRequest(BaseDTO):
+    """
+    Request to create a new Alexa user mapping.
+
+    Attributes:
+        alexa_user_id: Amazon user ID from Alexa
+        home_id: Home ID to map to
+    """
+    alexa_user_id: str
+    home_id: str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CreateAlexaMappingRequest':
+        """Create from dictionary."""
+        return cls(
+            alexa_user_id=require_field(data, 'alexa_user_id'),
+            home_id=require_field(data, 'home_id')
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'alexa_user_id': self.alexa_user_id,
+            'home_id': self.home_id
+        }
+
+    def validate(self) -> None:
+        """Validate request data."""
+        if not self.alexa_user_id or not self.alexa_user_id.strip():
+            raise ValidationError("alexa_user_id cannot be empty")
+        if not self.home_id or not self.home_id.strip():
+            raise ValidationError("home_id cannot be empty")
+
+
+@dataclass
+class UpdateAlexaMappingRequest(BaseDTO):
+    """
+    Request to update an Alexa user mapping.
+
+    Attributes:
+        home_id: New home ID to map to
+    """
+    home_id: str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'UpdateAlexaMappingRequest':
+        """Create from dictionary."""
+        return cls(
+            home_id=require_field(data, 'home_id')
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'home_id': self.home_id
+        }
+
+    def validate(self) -> None:
+        """Validate request data."""
+        if not self.home_id or not self.home_id.strip():
+            raise ValidationError("home_id cannot be empty")

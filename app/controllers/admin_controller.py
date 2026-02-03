@@ -10,17 +10,22 @@ from flask import request
 from app.controllers.base_controller import BaseController
 from app.services.user_service import UserService
 from app.services.home_service import HomeService
+from app.services.alexa_mapping_service import AlexaMappingService
 from app.dto.requests.admin_request import (
     CreateUserRequest,
     UpdateUserRequest,
     CreateHomeRequest,
-    UpdateHomeRequest
+    UpdateHomeRequest,
+    CreateAlexaMappingRequest,
+    UpdateAlexaMappingRequest
 )
 from app.dto.responses.admin_response import (
     UserResponse,
     HomeResponse,
     UserListResponse,
     HomeListResponse,
+    AlexaMappingResponse,
+    AlexaMappingListResponse,
     ErrorResponse
 )
 
@@ -40,7 +45,8 @@ class AdminController(BaseController):
     def __init__(
         self,
         user_service: UserService,
-        home_service: HomeService
+        home_service: HomeService,
+        alexa_mapping_service: AlexaMappingService
     ):
         """
         Initialize admin controller.
@@ -48,10 +54,12 @@ class AdminController(BaseController):
         Args:
             user_service: Service for user operations
             home_service: Service for home operations
+            alexa_mapping_service: Service for Alexa mapping operations
         """
         super().__init__(blueprint_name='admin', url_prefix='/admin')
         self._user_service = user_service
         self._home_service = home_service
+        self._alexa_mapping_service = alexa_mapping_service
         self._register_routes()
 
     def _register_routes(self) -> None:
@@ -131,6 +139,38 @@ class AdminController(BaseController):
             'toggle_test_mode',
             self.toggle_test_mode,
             methods=['POST']
+        )
+
+        # Alexa mapping endpoints
+        self.blueprint.add_url_rule(
+            '/alexa-mappings',
+            'create_alexa_mapping',
+            self.create_alexa_mapping,
+            methods=['POST']
+        )
+        self.blueprint.add_url_rule(
+            '/alexa-mappings',
+            'list_alexa_mappings',
+            self.list_alexa_mappings,
+            methods=['GET']
+        )
+        self.blueprint.add_url_rule(
+            '/alexa-mappings/<path:alexa_user_id>',
+            'get_alexa_mapping',
+            self.get_alexa_mapping,
+            methods=['GET']
+        )
+        self.blueprint.add_url_rule(
+            '/alexa-mappings/<path:alexa_user_id>',
+            'update_alexa_mapping',
+            self.update_alexa_mapping,
+            methods=['PUT']
+        )
+        self.blueprint.add_url_rule(
+            '/alexa-mappings/<path:alexa_user_id>',
+            'delete_alexa_mapping',
+            self.delete_alexa_mapping,
+            methods=['DELETE']
         )
 
     # ========== User Endpoints ==========
@@ -468,4 +508,131 @@ class AdminController(BaseController):
 
         except ValueError as e:
             logger.warning(f"Failed to toggle test mode for {home_id}: {str(e)}")
+            return self.error_response(str(e), 404)
+
+    # ========== Alexa Mapping Endpoints ==========
+
+    def create_alexa_mapping(self) -> Tuple[Any, int]:
+        """
+        POST /admin/alexa-mappings - Create new Alexa user mapping.
+
+        Request body:
+            {
+                "alexa_user_id": "amzn1.ask.account.ABC...",
+                "home_id": "karthi_test_home"
+            }
+
+        Returns:
+            201: Mapping created
+            400: Validation error
+        """
+        self.log_request('create_alexa_mapping')
+
+        try:
+            data = self.get_request_json()
+            req = CreateAlexaMappingRequest.from_dict(data)
+            req.validate()
+
+            mapping = self._alexa_mapping_service.create_mapping(
+                alexa_user_id=req.alexa_user_id,
+                home_id=req.home_id
+            )
+
+            response = AlexaMappingResponse.from_model(mapping)
+            logger.info(f"Alexa mapping created: {req.alexa_user_id} -> {req.home_id}")
+            return self.json_response(response.to_dict(), 201)
+
+        except ValueError as e:
+            logger.warning(f"Failed to create Alexa mapping: {str(e)}")
+            return self.error_response(str(e), 400)
+
+    def list_alexa_mappings(self) -> Tuple[Any, int]:
+        """
+        GET /admin/alexa-mappings - List all Alexa user mappings.
+
+        Returns:
+            200: List of mappings
+        """
+        self.log_request('list_alexa_mappings')
+
+        mappings = self._alexa_mapping_service.list_all_mappings()
+        response = AlexaMappingListResponse.from_models(mappings)
+        return self.json_response(response.to_dict(), 200)
+
+    def get_alexa_mapping(self, alexa_user_id: str) -> Tuple[Any, int]:
+        """
+        GET /admin/alexa-mappings/{alexa_user_id} - Get Alexa mapping details.
+
+        Args:
+            alexa_user_id: Amazon user ID
+
+        Returns:
+            200: Mapping details
+            404: Mapping not found
+        """
+        self.log_request(f'get_alexa_mapping:{alexa_user_id[:20]}...')
+
+        mapping = self._alexa_mapping_service.get_mapping(alexa_user_id)
+        if not mapping:
+            return self.error_response(f"Mapping for Alexa user not found", 404)
+
+        response = AlexaMappingResponse.from_model(mapping)
+        return self.json_response(response.to_dict(), 200)
+
+    def update_alexa_mapping(self, alexa_user_id: str) -> Tuple[Any, int]:
+        """
+        PUT /admin/alexa-mappings/{alexa_user_id} - Update Alexa mapping.
+
+        Args:
+            alexa_user_id: Amazon user ID
+
+        Request body:
+            {
+                "home_id": "new_home_id"
+            }
+
+        Returns:
+            200: Mapping updated
+            404: Mapping not found
+            400: Validation error
+        """
+        self.log_request(f'update_alexa_mapping:{alexa_user_id[:20]}...')
+
+        try:
+            data = self.get_request_json()
+            req = UpdateAlexaMappingRequest.from_dict(data)
+            req.validate()
+
+            mapping = self._alexa_mapping_service.update_mapping(
+                alexa_user_id=alexa_user_id,
+                new_home_id=req.home_id
+            )
+
+            response = AlexaMappingResponse.from_model(mapping)
+            logger.info(f"Alexa mapping updated: {alexa_user_id[:20]}... -> {req.home_id}")
+            return self.json_response(response.to_dict(), 200)
+
+        except ValueError as e:
+            logger.warning(f"Failed to update Alexa mapping: {str(e)}")
+            return self.error_response(str(e), 404)
+
+    def delete_alexa_mapping(self, alexa_user_id: str) -> Tuple[Any, int]:
+        """
+        DELETE /admin/alexa-mappings/{alexa_user_id} - Delete Alexa mapping.
+
+        Args:
+            alexa_user_id: Amazon user ID
+
+        Returns:
+            200: Mapping deleted
+            404: Mapping not found
+        """
+        self.log_request(f'delete_alexa_mapping:{alexa_user_id[:20]}...')
+
+        try:
+            self._alexa_mapping_service.delete_mapping(alexa_user_id)
+            logger.info(f"Alexa mapping deleted for user: {alexa_user_id[:20]}...")
+            return self.json_response({'message': 'Mapping deleted successfully'}, 200)
+
+        except ValueError as e:
             return self.error_response(str(e), 404)

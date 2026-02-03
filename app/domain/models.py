@@ -149,3 +149,23 @@ class Scene:
     name: str
     home_id: str
     requires_auth: bool = True
+
+
+@dataclass
+class AlexaUserMapping:
+    """
+    Alexa user to home mapping entity.
+
+    Maps Amazon Alexa user IDs to home IDs for multi-tenant support.
+    Allows multiple Alexa users to use the skill with their own homes.
+
+    Attributes:
+        alexa_user_id: Amazon user ID from Alexa (can be very long, up to 500 chars)
+        home_id: Home this Alexa user is mapped to
+        created_at: When the mapping was created
+        updated_at: When the mapping was last updated
+    """
+    alexa_user_id: str
+    home_id: str
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: Optional[datetime] = None

@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Orchestrator - Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .panel {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 20px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        input[type="text"], select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            background: #667eea;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        .btn:hover {
+            background: #5568d3;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        tr:hover {
+            background: #f8f9ff;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .truncate {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .truncate:hover::after {
+            content: attr(data-full);
+            position: absolute;
+            left: 0;
+            top: 100%;
+            background: #333;
+            color: white;
+            padding: 8px;
+            border-radius: 5px;
+            white-space: normal;
+            word-break: break-all;
+            z-index: 1000;
+            max-width: 400px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            font-size: 12px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Voice Orchestrator Admin</h1>
+            <p class="subtitle">Manage Alexa User Mappings</p>
+        </div>
+
+        <div id="alertBox" class="alert"></div>
+
+        <div class="stats" id="stats">
+            <div class="stat-card">
+                <div class="stat-number" id="totalMappings">0</div>
+                <div class="stat-label">Total Mappings</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalHomes">0</div>
+                <div class="stat-label">Total Homes</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Add New Alexa Mapping</h2>
+            <form id="addMappingForm">
+                <div class="form-group">
+                    <label for="alexaUserId">Alexa User ID</label>
+                    <input type="text" id="alexaUserId" required
+                           placeholder="amzn1.ask.account.ABC123...">
+                    <small style="color: #666; display: block; margin-top: 5px;">
+                        Find this in server logs when user tries to use the skill
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="homeId">Home ID</label>
+                    <select id="homeId" required>
+                        <option value="">-- Select Home --</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn">Add Mapping</button>
+            </form>
+        </div>
+
+        <div class="panel">
+            <h2>Existing Mappings</h2>
+            <div id="loadingMappings" class="loading">Loading mappings...</div>
+            <div id="mappingsTable" style="display: none;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Alexa User ID</th>
+                            <th>Home ID</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mappingsBody">
+                    </tbody>
+                </table>
+            </div>
+            <div id="emptyState" class="empty-state" style="display: none;">
+                No mappings found. Add one above to get started.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/admin';
+
+        // Utility functions
+        function showAlert(message, type = 'success') {
+            const alertBox = document.getElementById('alertBox');
+            alertBox.className = `alert alert-${type}`;
+            alertBox.textContent = message;
+            alertBox.style.display = 'block';
+            setTimeout(() => {
+                alertBox.style.display = 'none';
+            }, 5000);
+        }
+
+        function formatDate(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        }
+
+        // Load homes for dropdown
+        async function loadHomes() {
+            try {
+                const response = await fetch(`${API_BASE}/homes`);
+                const data = await response.json();
+
+                const homeSelect = document.getElementById('homeId');
+                homeSelect.innerHTML = '<option value="">-- Select Home --</option>';
+
+                data.homes.forEach(home => {
+                    const option = document.createElement('option');
+                    option.value = home.home_id;
+                    option.textContent = `${home.name} (${home.home_id})`;
+                    homeSelect.appendChild(option);
+                });
+
+                document.getElementById('totalHomes').textContent = data.total;
+            } catch (error) {
+                console.error('Error loading homes:', error);
+                showAlert('Failed to load homes', 'error');
+            }
+        }
+
+        // Load mappings
+        async function loadMappings() {
+            try {
+                const response = await fetch(`${API_BASE}/alexa-mappings`);
+                const data = await response.json();
+
+                document.getElementById('loadingMappings').style.display = 'none';
+
+                const tbody = document.getElementById('mappingsBody');
+                tbody.innerHTML = '';
+
+                if (data.mappings && data.mappings.length > 0) {
+                    document.getElementById('mappingsTable').style.display = 'block';
+                    document.getElementById('emptyState').style.display = 'none';
+
+                    data.mappings.forEach(mapping => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>
+                                <div class="truncate" data-full="${mapping.alexa_user_id}">
+                                    ${mapping.alexa_user_id}
+                                </div>
+                            </td>
+                            <td>${mapping.home_id}</td>
+                            <td>${formatDate(mapping.created_at)}</td>
+                            <td>
+                                <button class="btn btn-danger btn-small"
+                                        onclick="deleteMapping('${encodeURIComponent(mapping.alexa_user_id)}')">
+                                    Delete
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    document.getElementById('mappingsTable').style.display = 'none';
+                    document.getElementById('emptyState').style.display = 'block';
+                }
+
+                document.getElementById('totalMappings').textContent = data.total || 0;
+            } catch (error) {
+                console.error('Error loading mappings:', error);
+                showAlert('Failed to load mappings', 'error');
+                document.getElementById('loadingMappings').style.display = 'none';
+                document.getElementById('emptyState').style.display = 'block';
+            }
+        }
+
+        // Add mapping
+        document.getElementById('addMappingForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const alexaUserId = document.getElementById('alexaUserId').value;
+            const homeId = document.getElementById('homeId').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/alexa-mappings`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        alexa_user_id: alexaUserId,
+                        home_id: homeId
+                    })
+                });
+
+                if (response.ok) {
+                    showAlert('Mapping created successfully!', 'success');
+                    document.getElementById('addMappingForm').reset();
+                    loadMappings();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || 'Failed to create mapping', 'error');
+                }
+            } catch (error) {
+                console.error('Error creating mapping:', error);
+                showAlert('Failed to create mapping', 'error');
+            }
+        });
+
+        // Delete mapping
+        async function deleteMapping(alexaUserId) {
+            if (!confirm('Are you sure you want to delete this mapping?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/alexa-mappings/${alexaUserId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showAlert('Mapping deleted successfully!', 'success');
+                    loadMappings();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || 'Failed to delete mapping', 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting mapping:', error);
+                showAlert('Failed to delete mapping', 'error');
+            }
+        }
+
+        // Initialize
+        loadHomes();
+        loadMappings();
+    </script>
+</body>
+</html>

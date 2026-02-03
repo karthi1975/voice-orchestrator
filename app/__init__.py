@@ -126,6 +126,7 @@ class DependencyContainer:
             from app.repositories.implementations.sqlalchemy_challenge_repo import SQLAlchemyChallengeRepository
             from app.repositories.implementations.sqlalchemy_user_repo import SQLAlchemyUserRepository
             from app.repositories.implementations.sqlalchemy_home_repo import SQLAlchemyHomeRepository
+            from app.repositories.implementations.sqlalchemy_alexa_mapping_repo import SQLAlchemyAlexaMappingRepository
             from app.repositories.implementations.sqlalchemy_models import Base
 
             # Create database engine
@@ -147,6 +148,7 @@ class DependencyContainer:
             self.challenge_repository = SQLAlchemyChallengeRepository(self._db_session)
             self.user_repository = SQLAlchemyUserRepository(self._db_session)
             self.home_repository = SQLAlchemyHomeRepository(self._db_session)
+            self.alexa_mapping_repository = SQLAlchemyAlexaMappingRepository(self._db_session)
 
             logger.info("Repositories initialized (SQLAlchemy/PostgreSQL)")
         else:
@@ -157,6 +159,7 @@ class DependencyContainer:
             self.challenge_repository = InMemoryChallengeRepository()
             self.user_repository = InMemoryUserRepository()
             self.home_repository = InMemoryHomeRepository()
+            self.alexa_mapping_repository = None  # Not available in memory mode
             self._db_session = None
 
             logger.info("Repositories initialized (in-memory)")
@@ -165,6 +168,7 @@ class DependencyContainer:
         """Initialize service layer."""
         from app.services.user_service import UserService
         from app.services.home_service import HomeService
+        from app.services.alexa_mapping_service import AlexaMappingService
         from app.config.settings import get_settings
         settings = get_settings()
 
@@ -188,6 +192,15 @@ class DependencyContainer:
             home_repository=self.home_repository,
             user_repository=self.user_repository
         )
+
+        # Alexa mapping service (only in database mode)
+        if settings.USE_DATABASE and self.alexa_mapping_repository:
+            self.alexa_mapping_service = AlexaMappingService(
+                mapping_repository=self.alexa_mapping_repository,
+                home_repository=self.home_repository
+            )
+        else:
+            self.alexa_mapping_service = None
 
         # Challenge service (depends on repository)
         self.challenge_service = ChallengeService(
@@ -237,7 +250,8 @@ class DependencyContainer:
         # Admin controller for multi-tenant management
         self.admin_controller = AdminController(
             user_service=self.user_service,
-            home_service=self.home_service
+            home_service=self.home_service,
+            alexa_mapping_service=self.alexa_mapping_service
         )
 
         logger.info("Controllers initialized (Alexa, FPH, Admin)")
