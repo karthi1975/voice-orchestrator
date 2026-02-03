@@ -18,11 +18,13 @@ class AlexaRequest(BaseDTO):
         request_type: Type of request (LaunchRequest, IntentRequest, SessionEndedRequest)
         intent_name: Name of intent (if IntentRequest)
         session_id: Alexa session identifier
+        user_id: Amazon user ID
         slots: Intent slot values (if IntentRequest)
         raw_data: Original request data
     """
     request_type: str
     session_id: str
+    user_id: str
     intent_name: Optional[str] = None
     slots: Optional[Dict[str, Any]] = None
     raw_data: Optional[Dict[str, Any]] = None
@@ -53,6 +55,7 @@ class AlexaRequest(BaseDTO):
         # Extract required fields
         request_type = require_nested_field(data, "request", "type")
         session_id = require_nested_field(data, "session", "sessionId")
+        user_id = require_nested_field(data, "session", "user", "userId")
 
         # Extract optional fields
         intent_name = None
@@ -65,6 +68,7 @@ class AlexaRequest(BaseDTO):
         return cls(
             request_type=request_type,
             session_id=session_id,
+            user_id=user_id,
             intent_name=intent_name,
             slots=slots,
             raw_data=data
