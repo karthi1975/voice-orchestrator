@@ -49,7 +49,7 @@ class TextNormalizer:
         Performs:
         1. Lowercase conversion
         2. Homophone replacement
-        3. Digit to word conversion
+        3. Digit to word conversion (handles all positions)
         4. Whitespace cleanup
 
         Args:
@@ -62,6 +62,8 @@ class TextNormalizer:
             >>> normalizer = TextNormalizer()
             >>> normalizer.normalize("ocean 4")
             'ocean four'
+            >>> normalizer.normalize("9 window")
+            'nine window'
             >>> normalizer.normalize("mountain FOR")
             'mountain four'
             >>> normalizer.normalize("  sunset   to  ")
@@ -70,16 +72,19 @@ class TextNormalizer:
         # Convert to lowercase and strip
         text = text.lower().strip()
 
+        # Convert ALL digits to words (any position)
+        # Must do this BEFORE adding word boundary spaces
+        import re
+        for digit, word in self.DIGIT_MAP.items():
+            # Use regex to replace digits with word boundaries
+            text = re.sub(r'\b' + digit + r'\b', word, text)
+
         # Add spaces for word boundary replacements
         text = f" {text} "
 
         # Replace common spoken variations
         for old, new in self.REPLACEMENTS.items():
             text = text.replace(old, new)
-
-        # Convert digits to words
-        for digit, word in self.DIGIT_MAP.items():
-            text = text.replace(f' {digit} ', f' {word} ')
 
         # Clean up extra whitespace
         return ' '.join(text.split())
