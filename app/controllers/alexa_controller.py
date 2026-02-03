@@ -222,19 +222,28 @@ class AlexaController(BaseController):
         """
         try:
             from app.repositories.implementations.sqlalchemy_models import AlexaUserMappingModel
-            from app.config.database import get_db_session
+            from app.config.settings import get_settings
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
 
-            session = next(get_db_session())
-            mapping = session.query(AlexaUserMappingModel).filter_by(
-                alexa_user_id=alexa_user_id
-            ).first()
+            settings = get_settings()
+            engine = create_engine(settings.DATABASE_URL)
+            SessionLocal = sessionmaker(bind=engine)
+            session = SessionLocal()
 
-            if mapping:
-                return mapping.home_id
-            else:
-                logger.warning(f"No home mapping found for Alexa user: {alexa_user_id}")
-                return None
+            try:
+                mapping = session.query(AlexaUserMappingModel).filter_by(
+                    alexa_user_id=alexa_user_id
+                ).first()
+
+                if mapping:
+                    return mapping.home_id
+                else:
+                    logger.warning(f"No home mapping found for Alexa user: {alexa_user_id}")
+                    return None
+            finally:
+                session.close()
 
         except Exception as e:
-            logger.error(f"Error looking up home for Alexa user {alexa_user_id}: {str(e)}")
+            logger.error(f"Error looking up home for Alexa user {alexa_user_id}: {str(e)}", exc_info=True)
             return None
