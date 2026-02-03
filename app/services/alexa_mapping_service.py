@@ -8,7 +8,7 @@ import logging
 from typing import List, Optional
 from datetime import datetime
 from app.repositories.alexa_mapping_repository import AlexaMappingRepository
-from app.repositories.home_repository import HomeRepository
+from app.repositories.home_repository import IHomeRepository
 from app.domain.models import AlexaUserMapping
 
 
@@ -28,7 +28,7 @@ class AlexaMappingService:
     def __init__(
         self,
         mapping_repository: AlexaMappingRepository,
-        home_repository: HomeRepository
+        home_repository: IHomeRepository
     ):
         """
         Initialize service.
