@@ -232,6 +232,15 @@ class DependencyContainer:
     def _init_controllers(self) -> None:
         """Initialize controller layer."""
         from app.controllers.admin_controller import AdminController
+        from app.controllers.auth_controller import AuthController
+        from app.repositories.admin_user_repository import AdminUserRepository
+        from app.services.admin_auth_service import AdminAuthService
+
+        # Admin authentication components
+        self.admin_user_repository = AdminUserRepository()
+        self.admin_auth_service = AdminAuthService(
+            admin_user_repository=self.admin_user_repository
+        )
 
         # Alexa controller (depends on services)
         self.alexa_controller = AlexaController(
@@ -254,7 +263,12 @@ class DependencyContainer:
             alexa_mapping_service=self.alexa_mapping_service
         )
 
-        logger.info("Controllers initialized (Alexa, FPH, Admin)")
+        # Auth controller for admin login/logout
+        self.auth_controller = AuthController(
+            admin_auth_service=self.admin_auth_service
+        )
+
+        logger.info("Controllers initialized (Alexa, FPH, Admin, Auth)")
 
 
 def create_app(config: Optional[dict] = None) -> Flask:

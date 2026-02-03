@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - Voice Orchestrator</title>
+
+    <!-- Material Design Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #6200ea;
+            --primary-dark: #4a00b8;
+            --primary-light: #7c4dff;
+            --error: #cf6679;
+            --surface: #ffffff;
+            --text-primary: #000000;
+            --text-secondary: #666666;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            max-width: 400px;
+            width: 100%;
+            animation: slideUp 0.5s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .login-header {
+            background: var(--primary);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .login-header .material-icons {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.9;
+        }
+
+        .login-header h1 {
+            font-size: 24px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .login-header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .login-form {
+            padding: 40px 30px;
+        }
+
+        .form-field {
+            margin-bottom: 24px;
+            position: relative;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input-group {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 14px 16px;
+            padding-left: 48px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            font-family: 'Roboto', sans-serif;
+            transition: all 0.3s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(98, 0, 234, 0.1);
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 14px;
+            color: var(--text-secondary);
+            pointer-events: none;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: 0 4px 12px rgba(98, 0, 234, 0.3);
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            box-shadow: 0 6px 16px rgba(98, 0, 234, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .alert {
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+            display: none;
+            align-items: center;
+            gap: 12px;
+            animation: slideDown 0.3s;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .alert-error {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #f44336;
+        }
+
+        .alert-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #4caf50;
+        }
+
+        .login-footer {
+            padding: 20px 30px;
+            background: #f5f5f5;
+            text-align: center;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .default-credentials {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .default-credentials strong {
+            display: block;
+            margin-bottom: 8px;
+            color: #e65100;
+        }
+
+        .default-credentials ul {
+            list-style: none;
+            padding-left: 0;
+            margin-top: 8px;
+        }
+
+        .default-credentials li {
+            padding: 4px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <span class="material-icons">admin_panel_settings</span>
+            <h1>Admin Login</h1>
+            <p>Voice Orchestrator Dashboard</p>
+        </div>
+
+        <div class="login-form">
+            <div id="alertBox" class="alert"></div>
+
+            <div class="default-credentials">
+                <strong>Default Admin Accounts:</strong>
+                <ul>
+                    <li>admin / Admin@2024</li>
+                    <li>karthi / Karthi@2024</li>
+                    <li>operations / Ops@2024</li>
+                    <li>support / Support@2024</li>
+                    <li>developer / Dev@2024</li>
+                </ul>
+            </div>
+
+            <form id="loginForm">
+                <div class="form-field">
+                    <label class="form-label" for="username">Username</label>
+                    <div class="form-input-group">
+                        <span class="material-icons input-icon">person</span>
+                        <input type="text" id="username" class="form-input" required autofocus>
+                    </div>
+                </div>
+
+                <div class="form-field">
+                    <label class="form-label" for="password">Password</label>
+                    <div class="form-input-group">
+                        <span class="material-icons input-icon">lock</span>
+                        <input type="password" id="password" class="form-input" required>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" id="loginBtn">
+                    <span class="material-icons">login</span>
+                    Sign In
+                </button>
+            </form>
+        </div>
+
+        <div class="login-footer">
+            © 2026 Voice Orchestrator. All rights reserved.
+        </div>
+    </div>
+
+    <script>
+        function showAlert(message, type = 'error') {
+            const alertBox = document.getElementById('alertBox');
+            alertBox.className = `alert alert-${type}`;
+            alertBox.innerHTML = `
+                <span class="material-icons">${type === 'success' ? 'check_circle' : 'error'}</span>
+                ${message}
+            `;
+            alertBox.style.display = 'flex';
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const loginBtn = document.getElementById('loginBtn');
+
+            // Show loading state
+            loginBtn.disabled = true;
+            loginBtn.innerHTML = '<div class="spinner"></div> Signing in...';
+
+            try {
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    showAlert('Login successful! Redirecting...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/static/admin-dashboard.html';
+                    }, 1000);
+                } else {
+                    showAlert(data.message || 'Invalid username or password', 'error');
+                    loginBtn.disabled = false;
+                    loginBtn.innerHTML = '<span class="material-icons">login</span> Sign In';
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showAlert('Login failed. Please try again.', 'error');
+                loginBtn.disabled = false;
+                loginBtn.innerHTML = '<span class="material-icons">login</span> Sign In';
+            }
+        });
+
+        // Check if already authenticated
+        fetch('/auth/check')
+            .then(response => response.json())
+            .then(data => {
+                if (data.authenticated) {
+                    window.location.href = '/static/admin-dashboard.html';
+                }
+            })
+            .catch(err => console.log('Not authenticated'));
+    </script>
+</body>
+</html>

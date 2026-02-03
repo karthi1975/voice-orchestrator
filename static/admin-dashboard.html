@@ -44,9 +44,12 @@
             position: sticky;
             top: 0;
             z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
-        .header h1 {
+        .header-left h1 {
             font-size: 24px;
             font-weight: 500;
             display: flex;
@@ -58,6 +61,44 @@
             font-size: 14px;
             opacity: 0.9;
             margin-top: 4px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .user-info {
+            text-align: right;
+        }
+
+        .user-name {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .user-role {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+
+        .btn-logout {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .btn-logout:hover {
+            background: rgba(255,255,255,0.3);
         }
 
         /* Container */
@@ -467,11 +508,23 @@
 <body>
     <!-- Header -->
     <div class="header">
-        <h1>
-            <span class="material-icons">dashboard</span>
-            Voice Orchestrator Admin
-        </h1>
-        <div class="header-subtitle">Complete management dashboard for users, homes, and Alexa mappings</div>
+        <div class="header-left">
+            <h1>
+                <span class="material-icons">dashboard</span>
+                Voice Orchestrator Admin
+            </h1>
+            <div class="header-subtitle">Complete management dashboard for users, homes, and Alexa mappings</div>
+        </div>
+        <div class="header-right">
+            <div class="user-info">
+                <div class="user-name" id="userName">Loading...</div>
+                <div class="user-role">Administrator</div>
+            </div>
+            <button class="btn-logout" onclick="logout()">
+                <span class="material-icons">logout</span>
+                Logout
+            </button>
+        </div>
     </div>
 
     <!-- Container -->
@@ -751,6 +804,37 @@
         let allUsers = [];
         let allHomes = [];
         let allMappings = [];
+
+        // Check authentication on load
+        async function checkAuth() {
+            try {
+                const response = await fetch('/auth/check');
+                const data = await response.json();
+
+                if (!data.authenticated) {
+                    window.location.href = '/static/login.html';
+                    return false;
+                } else {
+                    document.getElementById('userName').textContent = data.user.full_name;
+                    return true;
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                window.location.href = '/static/login.html';
+                return false;
+            }
+        }
+
+        // Logout function
+        async function logout() {
+            try {
+                await fetch('/auth/logout', { method: 'POST' });
+                window.location.href = '/static/login.html';
+            } catch (error) {
+                console.error('Logout failed:', error);
+                window.location.href = '/static/login.html';
+            }
+        }
 
         // Tab switching
         function switchTab(tabName) {
@@ -1158,10 +1242,14 @@
         }
 
         // Initialize
-        loadStats();
-        loadUsers();
-        loadUserDropdowns();
-        loadHomeDropdowns();
+        checkAuth().then(authenticated => {
+            if (authenticated) {
+                loadStats();
+                loadUsers();
+                loadUserDropdowns();
+                loadHomeDropdowns();
+            }
+        });
     </script>
 </body>
 </html>

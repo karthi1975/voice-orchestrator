@@ -4,6 +4,8 @@ Flask server for Alexa Voice Authentication System
 
 from flask import Flask, render_template_string, jsonify, send_from_directory
 import logging
+import os
+from datetime import timedelta
 from config import PORT, DEBUG
 from home_assistant import test_connection
 
@@ -13,8 +15,17 @@ from routes.futureproofhome import futureproofhome_bp
 
 # Import new SOLID architecture dependency container
 from app import DependencyContainer
+from app.middleware.auth_middleware import setup_auth_middleware
 
 app = Flask(__name__)
+
+# Configure session (required for authentication)
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-2024')
+app.config['SESSION_COOKIE_NAME'] = 'admin_session'
+app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # No JavaScript access
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
 # Register legacy blueprints (backward compatibility)
 app.register_blueprint(alexa_bp, url_prefix='/alexa')
@@ -29,6 +40,10 @@ container = DependencyContainer()
 app.register_blueprint(container.alexa_controller.blueprint, url_prefix='/alexa/v2', name='alexa_v2')
 app.register_blueprint(container.fph_controller.blueprint, url_prefix='/futureproofhome/v2', name='futureproofhome_v2')
 app.register_blueprint(container.admin_controller.blueprint)
+app.register_blueprint(container.auth_controller.blueprint)
+
+# Setup authentication middleware
+setup_auth_middleware(app)
 
 # Store container for potential access
 app.container = container
