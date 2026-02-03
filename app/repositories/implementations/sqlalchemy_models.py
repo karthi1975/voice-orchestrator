@@ -88,8 +88,8 @@ class AlexaUserMappingModel(Base):
     """
     __tablename__ = 'alexa_user_mappings'
 
-    # Primary key
-    alexa_user_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    # Primary key (Amazon user IDs can be very long, up to 500 chars)
+    alexa_user_id: Mapped[str] = mapped_column(String(500), primary_key=True)
 
     # Foreign key to home
     home_id: Mapped[str] = mapped_column(
