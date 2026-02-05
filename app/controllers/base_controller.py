@@ -60,7 +60,9 @@ class BaseController:
         Raises:
             ValidationError: If request has no JSON
         """
-        data = request.get_json()
+        # Use force=True to parse JSON even if Content-Type is not application/json
+        # This is needed for Alexa requests which may not send the correct Content-Type
+        data = request.get_json(force=True)
         if data is None:
             raise ValidationError("Request body required")
         return data

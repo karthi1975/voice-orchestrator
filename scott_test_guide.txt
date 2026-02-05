@@ -1,0 +1,277 @@
+VOICE GUARDIAN ALEXA SKILL - TESTING GUIDE FOR SCOTT MEYERS
+=============================================================
+
+Hi Scott!
+
+Thank you for helping test the Voice Guardian Alexa skill. This guide will walk you through testing the voice authentication feature.
+
+WHAT YOU'LL BE TESTING
+-----------------------
+Voice Guardian is an Alexa skill that uses voice challenges to securely trigger home automation scenes. You'll test the authentication flow in TEST MODE (no actual home automation - just verifying the voice challenge system works).
+
+
+PREREQUISITES
+-------------
+1. You should have received an email invitation from Amazon Alexa Developer Console
+2. Accept the invitation and create/login to your Amazon Developer account
+3. Verify the skill endpoint is configured correctly:
+   - Go to Build → Endpoint in Developer Console
+   - Default Region should be: https://voiceorchestrator.homeadapt.us/alexa/v2
+   - SSL Certificate: "My development endpoint is a sub-domain..."
+   - Click "Save Endpoints"
+4. Build the interaction model (Build → Build Model button)
+5. The skill "Voice Guardian" should now appear in your Alexa app under "Skills > Your Skills > Dev"
+
+
+TESTING STEPS
+-------------
+
+STEP 1: Enable the Skill
+-------------------------
+1. Open the Alexa app on your phone
+2. Go to: More > Skills & Games > Your Skills > Dev
+3. Find "Voice Guardian" (invocation name: "voice guardian")
+4. Click "Enable to Use"
+5. Grant any requested permissions
+
+
+STEP 2: Test Voice Interaction
+-------------------------------
+Now you'll test the complete voice authentication flow:
+
+🗣️ Say: "Alexa, open voice guardian"
+   ✓ Expected: "Home security activated. Say night scene to trigger the scene."
+
+🗣️ Say: "night scene"
+   ✓ Expected: "Security check. Please say: [RANDOM PHRASE]"
+   ⚠️ IMPORTANT: Listen carefully to the phrase Alexa gives you!
+
+🗣️ Say: [THE EXACT PHRASE ALEXA JUST TOLD YOU]
+   Example: If Alexa said "ocean four", you say "ocean four"
+   ✓ Expected: "Voice verified. Test mode, scene night scene triggered successfully."
+
+
+WHAT'S HAPPENING BEHIND THE SCENES
+-----------------------------------
+When you first try to use the skill:
+1. Your Alexa User ID is automatically captured by the system
+2. Karthi will receive a notification
+3. Karthi will map your Alexa account to your test home
+4. After mapping, the voice authentication will work correctly
+
+On your FIRST attempt, you might get: "Your Alexa account is not linked to a home. Please contact support."
+
+This is EXPECTED! Just let Karthi know you tried it, and he'll complete the mapping. Then try again.
+
+
+TESTING SCENARIOS TO TRY
+-------------------------
+
+✅ SCENARIO 1: Successful Authentication
+- Say the challenge phrase correctly
+- Should hear "Voice verified"
+
+✅ SCENARIO 2: Wrong Challenge Response
+- Say the wrong phrase or random words
+- Should hear "Voice authentication failed"
+
+✅ SCENARIO 3: Multiple Attempts
+- Try triggering "night scene" multiple times
+- Each time should give you a DIFFERENT random challenge phrase
+
+
+WHAT TO REPORT BACK
+--------------------
+Please let Karthi know:
+
+1. ✓ Did the skill enable successfully in your Alexa app?
+2. ✓ What happened on your first attempt? (Expected: "not linked" message)
+3. ✓ After Karthi mapped your account, did authentication work?
+4. ✓ Was the voice challenge clear and easy to understand?
+5. ✓ Did saying the wrong phrase correctly fail authentication?
+6. ✓ Any issues or unexpected behavior?
+
+
+TROUBLESHOOTING
+---------------
+
+Problem: "This skill is not supported"
+Solution: Check Developer Console → Build → Endpoint
+- Should be: https://voiceorchestrator.homeadapt.us/alexa/v2
+- Click "Save Endpoints" and rebuild the model
+
+Problem: "Sorry, there was an error"
+Solution: Wait 30 seconds and try again. The skill might still be initializing.
+
+Problem: "Your Alexa account is not linked to a home"
+Solution: This is normal on first use. Contact Karthi to complete the mapping.
+
+Problem: Alexa doesn't understand your challenge response
+Solution: Speak clearly and at normal pace. Try again with the same phrase.
+
+Problem: "Challenge has expired"
+Solution: You waited too long. Say "night scene" again to get a fresh challenge.
+
+
+VOICE COMMANDS REFERENCE
+-------------------------
+Wake word: "Alexa, open voice guardian"
+Trigger scene: "night scene"
+Challenge response: [Say exactly what Alexa tells you]
+Help: "help"
+Stop: "stop" or "cancel"
+
+
+TECHNICAL DETAILS (Optional)
+-----------------------------
+- Skill uses 2-word random phrases from a phonetically distinct wordlist
+- Challenges expire after 60 seconds
+- Voice authentication uses Alexa's speech recognition
+- Test mode bypasses Home Assistant integration
+- Unique Alexa User ID: Captured automatically on first use
+
+
+QUESTIONS?
+----------
+Contact: Karthi
+Email: [Your Email Here]
+
+Thank you for your help testing Voice Guardian!
+
+
+═══════════════════════════════════════════════════════════════
+ADVANCED: Manual JSON Testing (Developers Only)
+═══════════════════════════════════════════════════════════════
+
+If you have access to the Alexa Developer Console and want to test using JSON:
+
+STEP 1: Launch Request
+-----------------------
+{
+  "version": "1.0",
+  "session": {
+    "new": true,
+    "sessionId": "amzn1.echo-api.session.SCOTT_TEST_123",
+    "application": {
+      "applicationId": "amzn1.ask.skill.c6391e7b-fd18-4e2d-88a7-d0a42e1bb8b0"
+    },
+    "user": {
+      "userId": "amzn1.ask.account.SCOTT_MEYERS_TEST"
+    }
+  },
+  "context": {
+    "System": {
+      "application": {
+        "applicationId": "amzn1.ask.skill.c6391e7b-fd18-4e2d-88a7-d0a42e1bb8b0"
+      },
+      "user": {
+        "userId": "amzn1.ask.account.SCOTT_MEYERS_TEST"
+      },
+      "device": {
+        "deviceId": "amzn1.ask.device.test",
+        "supportedInterfaces": {}
+      }
+    }
+  },
+  "request": {
+    "type": "LaunchRequest",
+    "requestId": "amzn1.echo-api.request.test-1",
+    "timestamp": "2026-02-05T20:00:00Z",
+    "locale": "en-US"
+  }
+}
+
+STEP 2: Night Scene Intent
+---------------------------
+{
+  "version": "1.0",
+  "session": {
+    "new": false,
+    "sessionId": "amzn1.echo-api.session.SCOTT_TEST_123",
+    "application": {
+      "applicationId": "amzn1.ask.skill.c6391e7b-fd18-4e2d-88a7-d0a42e1bb8b0"
+    },
+    "user": {
+      "userId": "amzn1.ask.account.SCOTT_MEYERS_TEST"
+    },
+    "attributes": {}
+  },
+  "context": {
+    "System": {
+      "application": {
+        "applicationId": "amzn1.ask.skill.c6391e7b-fd18-4e2d-88a7-d0a42e1bb8b0"
+      },
+      "user": {
+        "userId": "amzn1.ask.account.SCOTT_MEYERS_TEST"
+      },
+      "device": {
+        "deviceId": "amzn1.ask.device.test",
+        "supportedInterfaces": {}
+      }
+    }
+  },
+  "request": {
+    "type": "IntentRequest",
+    "requestId": "amzn1.echo-api.request.test-2",
+    "timestamp": "2026-02-05T20:01:00Z",
+    "locale": "en-US",
+    "intent": {
+      "name": "NightSceneIntent",
+      "confirmationStatus": "NONE",
+      "slots": {}
+    }
+  }
+}
+
+⚠️ COPY THE CHALLENGE PHRASE FROM THE RESPONSE!
+
+STEP 3: Challenge Response
+---------------------------
+{
+  "version": "1.0",
+  "session": {
+    "new": false,
+    "sessionId": "amzn1.echo-api.session.SCOTT_TEST_123",
+    "application": {
+      "applicationId": "amzn1.ask.skill.c6391e7b-fd18-4e2d-88a7-d0a42e1bb8b0"
+    },
+    "user": {
+      "userId": "amzn1.ask.account.SCOTT_MEYERS_TEST"
+    },
+    "attributes": {}
+  },
+  "context": {
+    "System": {
+      "application": {
+        "applicationId": "amzn1.ask.skill.c6391e7b-fd18-4e2d-88a7-d0a42e1bb8b0"
+      },
+      "user": {
+        "userId": "amzn1.ask.account.SCOTT_MEYERS_TEST"
+      },
+      "device": {
+        "deviceId": "amzn1.ask.device.test",
+        "supportedInterfaces": {}
+      }
+    }
+  },
+  "request": {
+    "type": "IntentRequest",
+    "requestId": "amzn1.echo-api.request.test-3",
+    "timestamp": "2026-02-05T20:02:00Z",
+    "locale": "en-US",
+    "intent": {
+      "name": "ChallengeResponseIntent",
+      "confirmationStatus": "NONE",
+      "slots": {
+        "response": {
+          "name": "response",
+          "value": "ocean four",
+          "confirmationStatus": "NONE",
+          "source": "USER"
+        }
+      }
+    }
+  }
+}
+
+Replace "ocean four" with the exact phrase from Step 2 response.
