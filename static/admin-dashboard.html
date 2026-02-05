@@ -738,6 +738,47 @@
 
         <!-- Alexa Mappings Tab -->
         <div id="tab-mappings" class="tab-content">
+            <!-- Unmapped Users Section -->
+            <div class="card" style="border: 2px solid #ff9800; background: #fff3e0;">
+                <div class="card-title" style="color: #e65100;">
+                    <span class="material-icons">person_search</span>
+                    Unmapped Alexa Users (Auto-Captured)
+                    <button class="btn btn-secondary btn-small" onclick="loadUnmappedUsers()" style="margin-left: auto;">
+                        <span class="material-icons">refresh</span>
+                        Refresh
+                    </button>
+                </div>
+                <div id="unmappedLoading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    Checking for unmapped users...
+                </div>
+                <div id="unmappedTable" style="display: none;">
+                    <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                        <p style="margin-bottom: 12px; color: #e65100;">
+                            <strong>Users who tried to use the Alexa skill but aren't mapped yet:</strong>
+                        </p>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Alexa User ID</th>
+                                        <th>First Seen</th>
+                                        <th>Last Seen</th>
+                                        <th>Attempts</th>
+                                        <th>Quick Assign</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="unmappedBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div id="unmappedEmpty" class="empty-state" style="display: none; background: white; border-radius: 8px; margin: 0;">
+                    <span class="material-icons" style="color: #4caf50;">check_circle</span>
+                    <div style="color: #2e7d32;">All users are mapped! No unmapped users found.</div>
+                </div>
+            </div>
+
             <!-- Create Mapping Form -->
             <div class="card">
                 <div class="card-title">
@@ -749,7 +790,7 @@
                         <div class="form-field">
                             <label class="form-label" for="mapping-alexa-id">Alexa User ID *</label>
                             <input type="text" id="mapping-alexa-id" class="form-input" required>
-                            <div class="form-hint">Find this in server logs when user tries to use the skill</div>
+                            <div class="form-hint">Find this in server logs or use Quick Assign above</div>
                         </div>
                         <div class="form-field">
                             <label class="form-label" for="mapping-home">Home *</label>
@@ -1149,12 +1190,73 @@
                 } else {
                     document.getElementById('mappingsEmpty').style.display = 'block';
                 }
+
+                // Also load unmapped users when viewing mappings tab
+                await loadUnmappedUsers();
             } catch (error) {
                 console.error('Error loading mappings:', error);
                 showAlert('Failed to load mappings', 'error');
             } finally {
                 document.getElementById('mappingsLoading').style.display = 'none';
             }
+        }
+
+        async function loadUnmappedUsers() {
+            try {
+                document.getElementById('unmappedLoading').style.display = 'block';
+                document.getElementById('unmappedTable').style.display = 'none';
+                document.getElementById('unmappedEmpty').style.display = 'none';
+
+                const response = await fetch(`${API_BASE}/unmapped-users`);
+                const data = await response.json();
+                const unmappedUsers = data.unmapped_users || [];
+
+                if (unmappedUsers.length > 0) {
+                    renderUnmappedUsers(unmappedUsers);
+                    document.getElementById('unmappedTable').style.display = 'block';
+                } else {
+                    document.getElementById('unmappedEmpty').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error loading unmapped users:', error);
+                document.getElementById('unmappedEmpty').style.display = 'block';
+            } finally {
+                document.getElementById('unmappedLoading').style.display = 'none';
+            }
+        }
+
+        function renderUnmappedUsers(users) {
+            const tbody = document.getElementById('unmappedBody');
+            tbody.innerHTML = users.map(user => `
+                <tr style="background: #fffbf0;">
+                    <td><span class="truncate" title="${user.alexa_user_id}" style="font-family: monospace; font-size: 12px;">${user.alexa_user_id}</span></td>
+                    <td>${formatDate(user.first_seen)}</td>
+                    <td>${formatDate(user.last_seen)}</td>
+                    <td><span class="badge badge-warning">${user.attempt_count}</span></td>
+                    <td>
+                        <button class="btn btn-primary btn-small" onclick="quickAssign('${user.alexa_user_id}')">
+                            <span class="material-icons">add_link</span>
+                            Assign to Home
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function quickAssign(alexaUserId) {
+            // Pre-fill the form with the Alexa User ID
+            document.getElementById('mapping-alexa-id').value = alexaUserId;
+
+            // Scroll to the form
+            document.getElementById('createMappingForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Highlight the home dropdown
+            const homeSelect = document.getElementById('mapping-home');
+            homeSelect.focus();
+            homeSelect.style.border = '2px solid #ff9800';
+            setTimeout(() => {
+                homeSelect.style.border = '';
+            }, 2000);
         }
 
         function renderMappings(mappings, homesMap) {
@@ -1207,6 +1309,7 @@
                     document.getElementById('createMappingForm').reset();
                     loadMappings();
                     loadStats();
+                    loadUnmappedUsers(); // Refresh unmapped users list
                 } else {
                     const error = await response.json();
                     showAlert(error.error || 'Failed to create mapping', 'error');

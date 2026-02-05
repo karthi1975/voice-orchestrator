@@ -214,8 +214,8 @@ class AlexaController(BaseController):
         """
         Get home_id for an Alexa user from database.
 
-        If the Alexa user is not mapped, logs a warning with the full user ID
-        so admins can create the mapping.
+        If the Alexa user is not mapped, logs a warning and tracks them
+        for easy assignment in the admin dashboard.
 
         Args:
             alexa_user_id: Amazon user ID from Alexa request
@@ -227,6 +227,7 @@ class AlexaController(BaseController):
             from app.config.settings import get_settings
             from app.services.alexa_mapping_service import AlexaMappingService
             from app.repositories.implementations.sqlalchemy_alexa_mapping_repo import SQLAlchemyAlexaMappingRepository
+            from app.services.unmapped_user_tracker import get_tracker
             from sqlalchemy import create_engine
             from sqlalchemy.orm import sessionmaker
 
@@ -244,12 +245,14 @@ class AlexaController(BaseController):
                     logger.info(f"Found home mapping: {alexa_user_id[:20]}... -> {mapping.home_id}")
                     return mapping.home_id
                 else:
-                    # Log unmapped user for admin to create mapping
+                    # Track unmapped user for admin dashboard
+                    tracker = get_tracker()
+                    tracker.record_unmapped_user(alexa_user_id)
+
                     logger.warning(
-                        f"UNMAPPED ALEXA USER - Add this to database:\n"
+                        f"UNMAPPED ALEXA USER - Auto-tracked for admin assignment:\n"
                         f"  Alexa User ID: {alexa_user_id}\n"
-                        f"  Use admin API: POST /admin/alexa-mappings\n"
-                        f"  Body: {{\"alexa_user_id\": \"{alexa_user_id}\", \"home_id\": \"YOUR_HOME_ID\"}}"
+                        f"  Check admin dashboard to assign to a home"
                     )
                     return None
             finally:

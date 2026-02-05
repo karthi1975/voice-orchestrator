@@ -1,0 +1,175 @@
+ALEXA VOICE GUARDIAN - COMPLETE TEST SEQUENCE
+==============================================
+
+IMPORTANT: Test these in ORDER! Copy/paste one at a time.
+
+═══════════════════════════════════════════════════════════════
+
+STEP 1: Launch Request (Start the skill)
+-----------------------------------------
+{
+  "version": "1.0",
+  "session": {
+    "new": true,
+    "sessionId": "amzn1.echo-api.session.test-12345",
+    "application": {
+      "applicationId": "amzn1.ask.skill.4d91cc44-a8eb-4561-be6d-8cc5091c0f10"
+    },
+    "user": {
+      "userId": "amzn1.ask.account.KARTHI_TEST"
+    }
+  },
+  "context": {
+    "System": {
+      "application": {
+        "applicationId": "amzn1.ask.skill.4d91cc44-a8eb-4561-be6d-8cc5091c0f10"
+      },
+      "user": {
+        "userId": "amzn1.ask.account.KARTHI_TEST"
+      },
+      "device": {
+        "deviceId": "amzn1.ask.device.test",
+        "supportedInterfaces": {}
+      }
+    }
+  },
+  "request": {
+    "type": "LaunchRequest",
+    "requestId": "amzn1.echo-api.request.test-1",
+    "timestamp": "2026-02-02T23:00:00Z",
+    "locale": "en-US"
+  }
+}
+
+✓ Expected: "Home security activated. Say night scene to trigger the scene."
+
+═══════════════════════════════════════════════════════════════
+
+STEP 2: Night Scene Intent (Request a challenge)
+-------------------------------------------------
+{
+  "version": "1.0",
+  "session": {
+    "new": false,
+    "sessionId": "amzn1.echo-api.session.test-12345",
+    "application": {
+      "applicationId": "amzn1.ask.skill.4d91cc44-a8eb-4561-be6d-8cc5091c0f10"
+    },
+    "user": {
+      "userId": "amzn1.ask.account.KARTHI_TEST"
+    },
+    "attributes": {}
+  },
+  "context": {
+    "System": {
+      "application": {
+        "applicationId": "amzn1.ask.skill.4d91cc44-a8eb-4561-be6d-8cc5091c0f10"
+      },
+      "user": {
+        "userId": "amzn1.ask.account.KARTHI_TEST"
+      },
+      "device": {
+        "deviceId": "amzn1.ask.device.test",
+        "supportedInterfaces": {}
+      }
+    }
+  },
+  "request": {
+    "type": "IntentRequest",
+    "requestId": "amzn1.echo-api.request.test-2",
+    "timestamp": "2026-02-02T23:01:00Z",
+    "locale": "en-US",
+    "intent": {
+      "name": "NightSceneIntent",
+      "confirmationStatus": "NONE",
+      "slots": {}
+    }
+  }
+}
+
+✓ Expected: "Security check. Please say: ocean four" (or similar)
+⚠️ COPY THE EXACT PHRASE FROM THE RESPONSE!
+
+═══════════════════════════════════════════════════════════════
+
+STEP 3: Challenge Response (Verify the challenge)
+--------------------------------------------------
+IMPORTANT: Replace "ocean four" below with the EXACT phrase from Step 2!
+
+{
+  "version": "1.0",
+  "session": {
+    "new": false,
+    "sessionId": "amzn1.echo-api.session.test-12345",
+    "application": {
+      "applicationId": "amzn1.ask.skill.4d91cc44-a8eb-4561-be6d-8cc5091c0f10"
+    },
+    "user": {
+      "userId": "amzn1.ask.account.KARTHI_TEST"
+    },
+    "attributes": {}
+  },
+  "context": {
+    "System": {
+      "application": {
+        "applicationId": "amzn1.ask.skill.4d91cc44-a8eb-4561-be6d-8cc5091c0f10"
+      },
+      "user": {
+        "userId": "amzn1.ask.account.KARTHI_TEST"
+      },
+      "device": {
+        "deviceId": "amzn1.ask.device.test",
+        "supportedInterfaces": {}
+      }
+    }
+  },
+  "request": {
+    "type": "IntentRequest",
+    "requestId": "amzn1.echo-api.request.test-3",
+    "timestamp": "2026-02-02T23:02:00Z",
+    "locale": "en-US",
+    "intent": {
+      "name": "ChallengeResponseIntent",
+      "confirmationStatus": "NONE",
+      "slots": {
+        "response": {
+          "name": "response",
+          "value": "ocean four",
+          "confirmationStatus": "NONE",
+          "source": "USER"
+        }
+      }
+    }
+  }
+}
+
+✓ Expected: "Voice verified. [TEST MODE] Scene 'night_scene' triggered successfully (Home Assistant skipped)"
+
+═══════════════════════════════════════════════════════════════
+
+TROUBLESHOOTING
+---------------
+
+Error: "Sorry, there was an error processing your request."
+
+Possible causes:
+1. You skipped Step 2 (must create challenge first!)
+2. Challenge phrase doesn't match exactly
+3. Session IDs are different between steps
+4. Too much time passed between Step 2 and 3 (challenges expire in 60 seconds)
+
+Solution: Start over from Step 1 and do ALL steps in order.
+
+═══════════════════════════════════════════════════════════════
+
+VOICE TESTING (After manual JSON works)
+========================================
+
+1. Say: "Alexa, open voice guardian"
+   → "Home security activated..."
+
+2. Say: "night scene"
+   → "Security check. Please say: ocean four"
+
+3. Say: "ocean four" (or whatever phrase it gave you)
+   → "Voice verified. Test mode, scene night scene triggered successfully"

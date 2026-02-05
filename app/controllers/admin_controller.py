@@ -172,6 +172,12 @@ class AdminController(BaseController):
             self.delete_alexa_mapping,
             methods=['DELETE']
         )
+        self.blueprint.add_url_rule(
+            '/unmapped-users',
+            'get_unmapped_users',
+            self.get_unmapped_users,
+            methods=['GET']
+        )
 
     # ========== User Endpoints ==========
 
@@ -538,6 +544,9 @@ class AdminController(BaseController):
                 home_id=req.home_id
             )
 
+            # Remove from unmapped users list
+            tracker.remove_unmapped_user(req.alexa_user_id)
+
             response = AlexaMappingResponse.from_model(mapping)
             logger.info(f"Alexa mapping created: {req.alexa_user_id} -> {req.home_id}")
             return self.json_response(response.to_dict(), 201)
@@ -636,3 +645,38 @@ class AdminController(BaseController):
 
         except ValueError as e:
             return self.error_response(str(e), 404)
+
+    def get_unmapped_users(self) -> Tuple[Any, int]:
+        """
+        GET /admin/unmapped-users - Get list of unmapped Alexa users.
+
+        Returns list of Alexa users who tried to use the skill but aren't
+        mapped to any home yet. Makes it easy to assign them.
+
+        Returns:
+            200: List of unmapped users
+        """
+        self.log_request('get_unmapped_users')
+
+        try:
+            from app.services.unmapped_user_tracker import get_tracker
+
+            tracker = get_tracker()
+            unmapped_users = tracker.get_unmapped_users()
+
+            return self.json_response({
+                'unmapped_users': [
+                    {
+                        'alexa_user_id': user.alexa_user_id,
+                        'first_seen': user.first_seen.isoformat(),
+                        'last_seen': user.last_seen.isoformat(),
+                        'attempt_count': user.attempt_count
+                    }
+                    for user in unmapped_users
+                ],
+                'total': len(unmapped_users)
+            }, 200)
+
+        except Exception as e:
+            logger.error(f"Error getting unmapped users: {str(e)}", exc_info=True)
+            return self.error_response(str(e), 500)
