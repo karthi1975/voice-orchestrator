@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from datetime import datetime
 from app.dto.base import BaseDTO
-from app.domain.models import User, Home, AlexaUserMapping
+from app.domain.models import User, Home, AlexaUserMapping, SceneWebhookMapping
 
 
 @dataclass
@@ -340,6 +340,88 @@ class AlexaMappingListResponse(BaseDTO):
         """Create from dictionary."""
         return cls(
             mappings=[AlexaMappingResponse.from_dict(m) for m in data['mappings']],
+            total=data['total']
+        )
+
+
+@dataclass
+class SceneWebhookMappingResponse(BaseDTO):
+    """Response containing scene webhook mapping data."""
+    id: str
+    home_id: str
+    scene_name: str
+    webhook_id: str
+    is_active: bool
+    created_at: str
+    updated_at: Optional[str]
+
+    @classmethod
+    def from_model(cls, mapping: SceneWebhookMapping) -> 'SceneWebhookMappingResponse':
+        """Create response from SceneWebhookMapping domain model."""
+        return cls(
+            id=mapping.id,
+            home_id=mapping.home_id,
+            scene_name=mapping.scene_name,
+            webhook_id=mapping.webhook_id,
+            is_active=mapping.is_active,
+            created_at=mapping.created_at.isoformat(),
+            updated_at=mapping.updated_at.isoformat() if mapping.updated_at else None
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        result = {
+            'id': self.id,
+            'home_id': self.home_id,
+            'scene_name': self.scene_name,
+            'webhook_id': self.webhook_id,
+            'is_active': self.is_active,
+            'created_at': self.created_at
+        }
+        if self.updated_at:
+            result['updated_at'] = self.updated_at
+        return result
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SceneWebhookMappingResponse':
+        """Create from dictionary."""
+        return cls(
+            id=data['id'],
+            home_id=data['home_id'],
+            scene_name=data['scene_name'],
+            webhook_id=data['webhook_id'],
+            is_active=data['is_active'],
+            created_at=data['created_at'],
+            updated_at=data.get('updated_at')
+        )
+
+
+@dataclass
+class SceneWebhookMappingListResponse(BaseDTO):
+    """Response containing list of scene webhook mappings."""
+    mappings: List[SceneWebhookMappingResponse]
+    total: int
+
+    @classmethod
+    def from_models(cls, mappings: List[SceneWebhookMapping]) -> 'SceneWebhookMappingListResponse':
+        """Create response from list of SceneWebhookMapping models."""
+        return cls(
+            mappings=[SceneWebhookMappingResponse.from_model(m) for m in mappings],
+            total=len(mappings)
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'mappings': [m.to_dict() for m in self.mappings],
+            'total': self.total
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SceneWebhookMappingListResponse':
+        """Create from dictionary."""
+        return cls(
+            mappings=[SceneWebhookMappingResponse.from_dict(m) for m in data['mappings']],
             total=data['total']
         )
 

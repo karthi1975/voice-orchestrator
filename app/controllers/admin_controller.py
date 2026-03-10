@@ -11,13 +11,16 @@ from app.controllers.base_controller import BaseController
 from app.services.user_service import UserService
 from app.services.home_service import HomeService
 from app.services.alexa_mapping_service import AlexaMappingService
+from app.services.scene_webhook_mapping_service import SceneWebhookMappingService
 from app.dto.requests.admin_request import (
     CreateUserRequest,
     UpdateUserRequest,
     CreateHomeRequest,
     UpdateHomeRequest,
     CreateAlexaMappingRequest,
-    UpdateAlexaMappingRequest
+    UpdateAlexaMappingRequest,
+    CreateSceneWebhookMappingRequest,
+    UpdateSceneWebhookMappingRequest
 )
 from app.dto.responses.admin_response import (
     UserResponse,
@@ -26,6 +29,8 @@ from app.dto.responses.admin_response import (
     HomeListResponse,
     AlexaMappingResponse,
     AlexaMappingListResponse,
+    SceneWebhookMappingResponse,
+    SceneWebhookMappingListResponse,
     ErrorResponse
 )
 
@@ -46,7 +51,8 @@ class AdminController(BaseController):
         self,
         user_service: UserService,
         home_service: HomeService,
-        alexa_mapping_service: AlexaMappingService
+        alexa_mapping_service: AlexaMappingService,
+        scene_mapping_service: SceneWebhookMappingService = None
     ):
         """
         Initialize admin controller.
@@ -55,11 +61,13 @@ class AdminController(BaseController):
             user_service: Service for user operations
             home_service: Service for home operations
             alexa_mapping_service: Service for Alexa mapping operations
+            scene_mapping_service: Service for scene webhook mapping operations
         """
         super().__init__(blueprint_name='admin', url_prefix='/admin')
         self._user_service = user_service
         self._home_service = home_service
         self._alexa_mapping_service = alexa_mapping_service
+        self._scene_mapping_service = scene_mapping_service
         self._register_routes()
 
     def _register_routes(self) -> None:
@@ -177,6 +185,44 @@ class AdminController(BaseController):
             'get_unmapped_users',
             self.get_unmapped_users,
             methods=['GET']
+        )
+
+        # Scene webhook mapping endpoints
+        self.blueprint.add_url_rule(
+            '/scene-mappings',
+            'create_scene_mapping',
+            self.create_scene_mapping,
+            methods=['POST']
+        )
+        self.blueprint.add_url_rule(
+            '/scene-mappings',
+            'list_scene_mappings',
+            self.list_scene_mappings,
+            methods=['GET']
+        )
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/scenes',
+            'list_home_scenes',
+            self.list_home_scenes,
+            methods=['GET']
+        )
+        self.blueprint.add_url_rule(
+            '/scene-mappings/<mapping_id>',
+            'get_scene_mapping',
+            self.get_scene_mapping,
+            methods=['GET']
+        )
+        self.blueprint.add_url_rule(
+            '/scene-mappings/<mapping_id>',
+            'update_scene_mapping',
+            self.update_scene_mapping,
+            methods=['PUT']
+        )
+        self.blueprint.add_url_rule(
+            '/scene-mappings/<mapping_id>',
+            'delete_scene_mapping',
+            self.delete_scene_mapping,
+            methods=['DELETE']
         )
 
     # ========== User Endpoints ==========
@@ -680,3 +726,149 @@ class AdminController(BaseController):
         except Exception as e:
             logger.error(f"Error getting unmapped users: {str(e)}", exc_info=True)
             return self.error_response(str(e), 500)
+
+    # ========== Scene Webhook Mapping Endpoints ==========
+
+    def create_scene_mapping(self) -> Tuple[Any, int]:
+        """
+        POST /admin/scene-mappings - Create new scene webhook mapping.
+
+        Request body:
+            {
+                "home_id": "scott_home",
+                "scene_name": "decorations on",
+                "webhook_id": "decorations_on_1751404299018"
+            }
+
+        Returns:
+            201: Mapping created
+            400: Validation error
+        """
+        self.log_request('create_scene_mapping')
+
+        try:
+            data = self.get_request_json()
+            req = CreateSceneWebhookMappingRequest.from_dict(data)
+            req.validate()
+
+            mapping = self._scene_mapping_service.create_mapping(
+                home_id=req.home_id,
+                scene_name=req.scene_name,
+                webhook_id=req.webhook_id
+            )
+
+            response = SceneWebhookMappingResponse.from_model(mapping)
+            logger.info(f"Scene mapping created: {req.scene_name} -> {req.webhook_id}")
+            return self.json_response(response.to_dict(), 201)
+
+        except ValueError as e:
+            logger.warning(f"Failed to create scene mapping: {str(e)}")
+            return self.error_response(str(e), 400)
+
+    def list_scene_mappings(self) -> Tuple[Any, int]:
+        """
+        GET /admin/scene-mappings - List all scene webhook mappings.
+
+        Returns:
+            200: List of mappings
+        """
+        self.log_request('list_scene_mappings')
+
+        mappings = self._scene_mapping_service.list_all()
+        response = SceneWebhookMappingListResponse.from_models(mappings)
+        return self.json_response(response.to_dict(), 200)
+
+    def list_home_scenes(self, home_id: str) -> Tuple[Any, int]:
+        """
+        GET /admin/homes/{home_id}/scenes - List scenes for a home.
+
+        Args:
+            home_id: Home ID
+
+        Returns:
+            200: List of scene mappings for the home
+        """
+        self.log_request(f'list_home_scenes:{home_id}')
+
+        mappings = self._scene_mapping_service.list_scenes_for_home(home_id)
+        response = SceneWebhookMappingListResponse.from_models(mappings)
+        return self.json_response(response.to_dict(), 200)
+
+    def get_scene_mapping(self, mapping_id: str) -> Tuple[Any, int]:
+        """
+        GET /admin/scene-mappings/{mapping_id} - Get scene mapping details.
+
+        Args:
+            mapping_id: Mapping ID
+
+        Returns:
+            200: Mapping details
+            404: Mapping not found
+        """
+        self.log_request(f'get_scene_mapping:{mapping_id}')
+
+        mapping = self._scene_mapping_service.get_mapping(mapping_id)
+        if not mapping:
+            return self.error_response("Scene mapping not found", 404)
+
+        response = SceneWebhookMappingResponse.from_model(mapping)
+        return self.json_response(response.to_dict(), 200)
+
+    def update_scene_mapping(self, mapping_id: str) -> Tuple[Any, int]:
+        """
+        PUT /admin/scene-mappings/{mapping_id} - Update scene mapping.
+
+        Args:
+            mapping_id: Mapping ID
+
+        Request body:
+            {
+                "scene_name": "new name",    # optional
+                "webhook_id": "new_id",      # optional
+                "is_active": true            # optional
+            }
+
+        Returns:
+            200: Mapping updated
+            404: Mapping not found
+        """
+        self.log_request(f'update_scene_mapping:{mapping_id}')
+
+        try:
+            data = self.get_request_json()
+            req = UpdateSceneWebhookMappingRequest.from_dict(data)
+
+            mapping = self._scene_mapping_service.update_mapping(
+                mapping_id=mapping_id,
+                scene_name=req.scene_name,
+                webhook_id=req.webhook_id,
+                is_active=req.is_active
+            )
+
+            response = SceneWebhookMappingResponse.from_model(mapping)
+            logger.info(f"Scene mapping updated: {mapping_id}")
+            return self.json_response(response.to_dict(), 200)
+
+        except ValueError as e:
+            logger.warning(f"Failed to update scene mapping {mapping_id}: {str(e)}")
+            return self.error_response(str(e), 404)
+
+    def delete_scene_mapping(self, mapping_id: str) -> Tuple[Any, int]:
+        """
+        DELETE /admin/scene-mappings/{mapping_id} - Delete scene mapping.
+
+        Args:
+            mapping_id: Mapping ID
+
+        Returns:
+            200: Mapping deleted
+            404: Mapping not found
+        """
+        self.log_request(f'delete_scene_mapping:{mapping_id}')
+
+        result = self._scene_mapping_service.delete_mapping(mapping_id)
+        if not result:
+            return self.error_response("Scene mapping not found", 404)
+
+        logger.info(f"Scene mapping deleted: {mapping_id}")
+        return self.json_response({'message': 'Scene mapping deleted successfully'}, 200)

@@ -150,6 +150,9 @@ class DependencyContainer:
             self.home_repository = SQLAlchemyHomeRepository(self._db_session)
             self.alexa_mapping_repository = SQLAlchemyAlexaMappingRepository(self._db_session)
 
+            from app.repositories.implementations.sqlalchemy_scene_webhook_mapping_repo import SQLAlchemySceneWebhookMappingRepository
+            self.scene_mapping_repository = SQLAlchemySceneWebhookMappingRepository(self._db_session)
+
             logger.info("Repositories initialized (SQLAlchemy/PostgreSQL)")
         else:
             # Use in-memory repositories (default)
@@ -161,6 +164,9 @@ class DependencyContainer:
             self.home_repository = InMemoryHomeRepository()
             self.alexa_mapping_repository = None  # Not available in memory mode
             self._db_session = None
+
+            from app.repositories.implementations.in_memory_scene_webhook_mapping_repo import InMemorySceneWebhookMappingRepository
+            self.scene_mapping_repository = InMemorySceneWebhookMappingRepository()
 
             logger.info("Repositories initialized (in-memory)")
 
@@ -201,6 +207,13 @@ class DependencyContainer:
             )
         else:
             self.alexa_mapping_service = None
+
+        # Scene webhook mapping service
+        from app.services.scene_webhook_mapping_service import SceneWebhookMappingService
+        self.scene_mapping_service = SceneWebhookMappingService(
+            mapping_repository=self.scene_mapping_repository,
+            home_repository=self.home_repository
+        )
 
         # Challenge service (depends on repository)
         self.challenge_service = ChallengeService(
@@ -260,7 +273,8 @@ class DependencyContainer:
         self.admin_controller = AdminController(
             user_service=self.user_service,
             home_service=self.home_service,
-            alexa_mapping_service=self.alexa_mapping_service
+            alexa_mapping_service=self.alexa_mapping_service,
+            scene_mapping_service=self.scene_mapping_service
         )
 
         # Auth controller for admin login/logout

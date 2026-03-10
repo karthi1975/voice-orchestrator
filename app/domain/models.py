@@ -132,23 +132,30 @@ class Home:
 
 
 @dataclass
-class Scene:
+class SceneWebhookMapping:
     """
-    Home automation scene entity.
+    Maps a scene name to a Home Assistant webhook ID for a specific home.
 
-    Represents a Home Assistant scene that can be triggered
-    after successful voice authentication.
+    Each home can have multiple scenes, each with its own HA webhook endpoint.
+    When a user activates a scene via Alexa, the system looks up the webhook_id
+    for that scene at that home and calls the corresponding HA webhook.
 
     Attributes:
-        scene_id: Unique scene identifier
-        name: Human-readable scene name
+        id: Unique mapping identifier (UUID)
         home_id: Home this scene belongs to
-        requires_auth: Whether this scene requires voice authentication
+        scene_name: Human-friendly scene name (e.g., "decorations on", "night scene")
+        webhook_id: HA webhook ID for this scene (e.g., "decorations_on_1751404299018")
+        is_active: Whether this scene mapping is active
+        created_at: When the mapping was created
+        updated_at: When the mapping was last updated
     """
-    scene_id: str
-    name: str
+    id: str
     home_id: str
-    requires_auth: bool = True
+    scene_name: str
+    webhook_id: str
+    is_active: bool = True
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: Optional[datetime] = None
 
 
 @dataclass

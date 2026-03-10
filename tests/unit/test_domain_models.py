@@ -7,7 +7,7 @@ Tests core business entities in isolation without dependencies.
 import pytest
 from datetime import datetime, timedelta
 from app.domain.enums import ClientType, ChallengeStatus
-from app.domain.models import Challenge, Home, Scene
+from app.domain.models import Challenge, Home, SceneWebhookMapping
 
 
 @pytest.mark.unit
@@ -164,25 +164,27 @@ class TestHome:
 
 
 @pytest.mark.unit
-class TestScene:
-    """Tests for Scene domain model."""
+class TestSceneWebhookMapping:
+    """Tests for SceneWebhookMapping domain model."""
 
-    def test_scene_creation(self, sample_scene):
-        """Test creating a new scene."""
-        assert sample_scene.scene_id == "scene_night"
-        assert sample_scene.name == "Night Scene"
-        assert sample_scene.home_id == "home_1"
-        assert sample_scene.requires_auth is True
+    def test_mapping_creation(self, sample_scene_mapping):
+        """Test creating a new scene webhook mapping."""
+        assert sample_scene_mapping.id == "mapping_1"
+        assert sample_scene_mapping.home_id == "home_1"
+        assert sample_scene_mapping.scene_name == "decorations on"
+        assert sample_scene_mapping.webhook_id == "decorations_on_1751404299018"
+        assert sample_scene_mapping.is_active is True
 
-    def test_scene_without_auth(self):
-        """Test creating a scene that doesn't require auth."""
-        scene = Scene(
-            scene_id="scene_guest",
-            name="Guest Mode",
+    def test_mapping_defaults(self):
+        """Test scene webhook mapping default values."""
+        mapping = SceneWebhookMapping(
+            id="test_id",
             home_id="home_1",
-            requires_auth=False
+            scene_name="test scene",
+            webhook_id="test_webhook"
         )
-        assert scene.requires_auth is False
+        assert mapping.is_active is True
+        assert mapping.updated_at is None
 
 
 @pytest.mark.unit

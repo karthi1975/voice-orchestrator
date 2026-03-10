@@ -513,7 +513,7 @@
                 <span class="material-icons">dashboard</span>
                 Voice Orchestrator Admin
             </h1>
-            <div class="header-subtitle">Complete management dashboard for users, homes, and Alexa mappings</div>
+            <div class="header-subtitle">Complete management dashboard for users, homes, Alexa mappings, and scene webhooks</div>
         </div>
         <div class="header-right">
             <div class="user-info">
@@ -550,6 +550,10 @@
                 <span class="material-icons">link</span>
                 Alexa Mappings
             </button>
+            <button class="nav-tab" onclick="switchTab('scenes')">
+                <span class="material-icons">movie</span>
+                Scene Mappings
+            </button>
         </div>
 
         <!-- Overview Tab -->
@@ -568,6 +572,10 @@
                     <div class="stat-label">Alexa Mappings</div>
                 </div>
                 <div class="stat-card">
+                    <div class="stat-value" id="stat-scenes">0</div>
+                    <div class="stat-label">Scene Mappings</div>
+                </div>
+                <div class="stat-card">
                     <div class="stat-value" id="stat-test-mode">0</div>
                     <div class="stat-label">Test Mode Active</div>
                 </div>
@@ -583,6 +591,7 @@
                     <li><strong>Create a Home</strong> - Go to Homes tab and register their home with Home Assistant URL</li>
                     <li><strong>Enable Test Mode</strong> - Toggle test mode for the home to test without Home Assistant</li>
                     <li><strong>Add Alexa Mapping</strong> - Go to Alexa Mappings tab and link their Alexa user ID to the home</li>
+                    <li><strong>Add Scene Mappings</strong> - Go to Scene Mappings tab and map each scene name to its HA webhook ID</li>
                     <li><strong>Test</strong> - User can now use Alexa skill in test mode</li>
                     <li><strong>Production</strong> - Disable test mode when ready for real Home Assistant integration</li>
                 </ol>
@@ -838,6 +847,90 @@
                 </div>
             </div>
         </div>
+
+        <!-- Scene Mappings Tab -->
+        <div id="tab-scenes" class="tab-content">
+            <!-- Create Scene Mapping Form -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="material-icons">add_circle</span>
+                    Add Scene Webhook Mapping
+                </div>
+                <form id="createSceneMappingForm">
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label class="form-label" for="scene-home">Home *</label>
+                            <select id="scene-home" class="form-input" required>
+                                <option value="">-- Select Home --</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label" for="scene-name">Scene Name *</label>
+                            <input type="text" id="scene-name" class="form-input" required
+                                   placeholder="e.g., decorations on">
+                            <div class="form-hint">Must match Alexa skill slot value (e.g., decorations on, night scene, movie mode)</div>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label" for="scene-webhook">Webhook ID *</label>
+                            <input type="text" id="scene-webhook" class="form-input" required
+                                   placeholder="e.g., decorations_on_1751404299018">
+                            <div class="form-hint">The HA webhook ID (last segment of the webhook URL)</div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <span class="material-icons">add</span>
+                        Create Scene Mapping
+                    </button>
+                </form>
+            </div>
+
+            <!-- Scene Mappings List -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="material-icons">movie</span>
+                    All Scene Webhook Mappings
+                    <button class="btn btn-secondary btn-small" onclick="loadSceneMappings()" style="margin-left: auto;">
+                        <span class="material-icons">refresh</span>
+                        Refresh
+                    </button>
+                </div>
+
+                <!-- Filter by Home -->
+                <div style="margin-bottom: 16px;">
+                    <select id="scene-filter-home" class="form-input" style="max-width: 300px;"
+                            onchange="filterSceneMappings()">
+                        <option value="">All Homes</option>
+                    </select>
+                </div>
+
+                <div id="scenesLoading" class="loading">
+                    <div class="spinner"></div>
+                    Loading scene mappings...
+                </div>
+                <div id="scenesTable" style="display: none;">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Home</th>
+                                    <th>Scene Name</th>
+                                    <th>Webhook ID</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scenesBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="scenesEmpty" class="empty-state" style="display: none;">
+                    <span class="material-icons">movie</span>
+                    <div>No scene mappings found. Add one above to get started.</div>
+                    <div style="margin-top: 8px; font-size: 14px;">Each scene maps to a specific Home Assistant webhook automation.</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -890,6 +983,7 @@
             if (tabName === 'users') loadUsers();
             if (tabName === 'homes') loadHomes();
             if (tabName === 'mappings') loadMappings();
+            if (tabName === 'scenes') loadSceneMappings();
         }
 
         // Utility functions
@@ -915,19 +1009,22 @@
         // Load statistics
         async function loadStats() {
             try {
-                const [usersResp, homesResp, mappingsResp] = await Promise.all([
+                const [usersResp, homesResp, mappingsResp, scenesResp] = await Promise.all([
                     fetch(`${API_BASE}/users`),
                     fetch(`${API_BASE}/homes`),
-                    fetch(`${API_BASE}/alexa-mappings`)
+                    fetch(`${API_BASE}/alexa-mappings`),
+                    fetch(`${API_BASE}/scene-mappings`)
                 ]);
 
                 const users = await usersResp.json();
                 const homes = await homesResp.json();
                 const mappings = await mappingsResp.json();
+                const scenes = await scenesResp.json();
 
                 document.getElementById('stat-users').textContent = users.total || 0;
                 document.getElementById('stat-homes').textContent = homes.total || 0;
                 document.getElementById('stat-mappings').textContent = mappings.total || 0;
+                document.getElementById('stat-scenes').textContent = scenes.total || 0;
 
                 const testModeCount = homes.homes ? homes.homes.filter(h => h.test_mode).length : 0;
                 document.getElementById('stat-test-mode').textContent = testModeCount;
@@ -1079,6 +1176,9 @@
                     </td>
                     <td>
                         <div class="action-buttons">
+                            <button class="btn btn-icon btn-small" onclick="viewHomeScenes('${home.home_id}')" title="View Scenes">
+                                <span class="material-icons">movie</span>
+                            </button>
                             <button class="btn btn-icon btn-small" onclick="editHome('${home.home_id}')" title="Edit">
                                 <span class="material-icons">edit</span>
                             </button>
@@ -1115,6 +1215,26 @@
         function editHome(homeId) {
             // TODO: Implement edit functionality
             showAlert('Edit functionality coming soon!', 'info');
+        }
+
+        function viewHomeScenes(homeId) {
+            // Switch to scenes tab and filter by home
+            document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+            // Activate scenes tab
+            const scenesTab = document.querySelectorAll('.nav-tab')[4];
+            scenesTab.classList.add('active');
+            document.getElementById('tab-scenes').classList.add('active');
+
+            // Load scenes then filter
+            loadSceneMappings().then(() => {
+                document.getElementById('scene-filter-home').value = homeId;
+                filterSceneMappings();
+
+                // Pre-select this home in the create form too
+                document.getElementById('scene-home').value = homeId;
+            });
         }
 
         async function loadUserDropdowns() {
@@ -1341,6 +1461,219 @@
             } catch (error) {
                 console.error('Error deleting mapping:', error);
                 showAlert('Failed to delete mapping', 'error');
+            }
+        }
+
+        // === SCENE MAPPINGS ===
+        let allSceneMappings = [];
+
+        async function loadSceneMappings() {
+            try {
+                document.getElementById('scenesLoading').style.display = 'block';
+                document.getElementById('scenesTable').style.display = 'none';
+                document.getElementById('scenesEmpty').style.display = 'none';
+
+                const [scenesResp, homesResp] = await Promise.all([
+                    fetch(`${API_BASE}/scene-mappings`),
+                    fetch(`${API_BASE}/homes`)
+                ]);
+
+                const scenesData = await scenesResp.json();
+                const homesData = await homesResp.json();
+
+                allSceneMappings = scenesData.mappings || [];
+                const homes = homesData.homes || [];
+
+                // Populate filter dropdown
+                const filterSelect = document.getElementById('scene-filter-home');
+                filterSelect.innerHTML = '<option value="">All Homes</option>' +
+                    homes.map(h => `<option value="${h.home_id}">${h.name} (${h.home_id})</option>`).join('');
+
+                // Populate create form dropdown
+                const formSelect = document.getElementById('scene-home');
+                formSelect.innerHTML = '<option value="">-- Select Home --</option>' +
+                    homes.map(h => `<option value="${h.home_id}">${h.name} (${h.home_id})</option>`).join('');
+
+                if (allSceneMappings.length > 0) {
+                    renderSceneMappings(allSceneMappings, homes);
+                    document.getElementById('scenesTable').style.display = 'block';
+                } else {
+                    document.getElementById('scenesEmpty').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error loading scene mappings:', error);
+                showAlert('Failed to load scene mappings', 'error');
+            } finally {
+                document.getElementById('scenesLoading').style.display = 'none';
+            }
+        }
+
+        function renderSceneMappings(mappings, homes) {
+            const homesMap = {};
+            (homes || []).forEach(h => homesMap[h.home_id] = h.name);
+
+            const tbody = document.getElementById('scenesBody');
+            tbody.innerHTML = mappings.map(m => `
+                <tr>
+                    <td><strong>${homesMap[m.home_id] || m.home_id}</strong>
+                        <div style="font-size: 11px; color: var(--text-secondary);">${m.home_id}</div>
+                    </td>
+                    <td>
+                        <strong style="text-transform: capitalize;">${m.scene_name}</strong>
+                    </td>
+                    <td>
+                        <span style="font-family: monospace; font-size: 13px;">${m.webhook_id}</span>
+                    </td>
+                    <td>
+                        <span class="badge ${m.is_active ? 'badge-success' : 'badge-error'}">
+                            ${m.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                    </td>
+                    <td>${formatDate(m.created_at)}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <button class="btn btn-icon btn-small" onclick="editSceneMapping('${m.id}')" title="Edit">
+                                <span class="material-icons">edit</span>
+                            </button>
+                            <button class="btn btn-icon btn-small" onclick="toggleSceneActive('${m.id}', ${!m.is_active})" title="${m.is_active ? 'Deactivate' : 'Activate'}">
+                                <span class="material-icons">${m.is_active ? 'toggle_on' : 'toggle_off'}</span>
+                            </button>
+                            <button class="btn btn-icon btn-small" style="color: var(--error);"
+                                    onclick="deleteSceneMapping('${m.id}', '${m.scene_name}')" title="Delete">
+                                <span class="material-icons">delete</span>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function filterSceneMappings() {
+            const homeId = document.getElementById('scene-filter-home').value;
+            if (homeId) {
+                const filtered = allSceneMappings.filter(m => m.home_id === homeId);
+                if (filtered.length > 0) {
+                    renderSceneMappings(filtered, allHomes);
+                    document.getElementById('scenesTable').style.display = 'block';
+                    document.getElementById('scenesEmpty').style.display = 'none';
+                } else {
+                    document.getElementById('scenesTable').style.display = 'none';
+                    document.getElementById('scenesEmpty').style.display = 'block';
+                }
+            } else {
+                if (allSceneMappings.length > 0) {
+                    renderSceneMappings(allSceneMappings, allHomes);
+                    document.getElementById('scenesTable').style.display = 'block';
+                    document.getElementById('scenesEmpty').style.display = 'none';
+                } else {
+                    document.getElementById('scenesTable').style.display = 'none';
+                    document.getElementById('scenesEmpty').style.display = 'block';
+                }
+            }
+        }
+
+        document.getElementById('createSceneMappingForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const homeId = document.getElementById('scene-home').value;
+            const sceneName = document.getElementById('scene-name').value;
+            const webhookId = document.getElementById('scene-webhook').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/scene-mappings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        home_id: homeId,
+                        scene_name: sceneName,
+                        webhook_id: webhookId
+                    })
+                });
+
+                if (response.ok) {
+                    showAlert(`Scene "${sceneName}" mapped successfully for ${homeId}!`, 'success');
+                    document.getElementById('createSceneMappingForm').reset();
+                    loadSceneMappings();
+                    loadStats();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || 'Failed to create scene mapping', 'error');
+                }
+            } catch (error) {
+                console.error('Error creating scene mapping:', error);
+                showAlert('Failed to create scene mapping', 'error');
+            }
+        });
+
+        async function editSceneMapping(mappingId) {
+            const mapping = allSceneMappings.find(m => m.id === mappingId);
+            if (!mapping) return;
+
+            const newWebhook = prompt(`Edit webhook ID for "${mapping.scene_name}":`, mapping.webhook_id);
+            if (newWebhook === null || newWebhook === mapping.webhook_id) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/scene-mappings/${mappingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ webhook_id: newWebhook })
+                });
+
+                if (response.ok) {
+                    showAlert(`Scene mapping updated successfully!`, 'success');
+                    loadSceneMappings();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || 'Failed to update scene mapping', 'error');
+                }
+            } catch (error) {
+                console.error('Error updating scene mapping:', error);
+                showAlert('Failed to update scene mapping', 'error');
+            }
+        }
+
+        async function toggleSceneActive(mappingId, newState) {
+            try {
+                const response = await fetch(`${API_BASE}/scene-mappings/${mappingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: newState })
+                });
+
+                if (response.ok) {
+                    showAlert(`Scene mapping ${newState ? 'activated' : 'deactivated'}!`, 'success');
+                    loadSceneMappings();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || 'Failed to update scene mapping', 'error');
+                }
+            } catch (error) {
+                console.error('Error toggling scene mapping:', error);
+                showAlert('Failed to toggle scene mapping', 'error');
+            }
+        }
+
+        async function deleteSceneMapping(mappingId, sceneName) {
+            if (!confirm(`Delete scene mapping "${sceneName}"? This cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/scene-mappings/${mappingId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showAlert(`Scene mapping "${sceneName}" deleted!`, 'success');
+                    loadSceneMappings();
+                    loadStats();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || 'Failed to delete scene mapping', 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting scene mapping:', error);
+                showAlert('Failed to delete scene mapping', 'error');
             }
         }
 

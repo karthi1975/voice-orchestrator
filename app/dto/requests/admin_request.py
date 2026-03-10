@@ -242,3 +242,79 @@ class UpdateAlexaMappingRequest(BaseDTO):
         """Validate request data."""
         if not self.home_id or not self.home_id.strip():
             raise ValidationError("home_id cannot be empty")
+
+
+@dataclass
+class CreateSceneWebhookMappingRequest(BaseDTO):
+    """
+    Request to create a new scene webhook mapping.
+
+    Attributes:
+        home_id: Home this scene belongs to
+        scene_name: Human-friendly scene name
+        webhook_id: HA webhook ID for this scene
+    """
+    home_id: str
+    scene_name: str
+    webhook_id: str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CreateSceneWebhookMappingRequest':
+        """Create from dictionary."""
+        return cls(
+            home_id=require_field(data, 'home_id'),
+            scene_name=require_field(data, 'scene_name'),
+            webhook_id=require_field(data, 'webhook_id')
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'home_id': self.home_id,
+            'scene_name': self.scene_name,
+            'webhook_id': self.webhook_id
+        }
+
+    def validate(self) -> None:
+        """Validate request data."""
+        if not self.home_id or not self.home_id.strip():
+            raise ValidationError("home_id cannot be empty")
+        if not self.scene_name or not self.scene_name.strip():
+            raise ValidationError("scene_name cannot be empty")
+        if not self.webhook_id or not self.webhook_id.strip():
+            raise ValidationError("webhook_id cannot be empty")
+
+
+@dataclass
+class UpdateSceneWebhookMappingRequest(BaseDTO):
+    """
+    Request to update a scene webhook mapping.
+
+    Attributes:
+        scene_name: New scene name (optional)
+        webhook_id: New webhook ID (optional)
+        is_active: New active status (optional)
+    """
+    scene_name: Optional[str] = None
+    webhook_id: Optional[str] = None
+    is_active: Optional[bool] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'UpdateSceneWebhookMappingRequest':
+        """Create from dictionary."""
+        return cls(
+            scene_name=get_field(data, 'scene_name'),
+            webhook_id=get_field(data, 'webhook_id'),
+            is_active=get_field(data, 'is_active')
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        result = {}
+        if self.scene_name is not None:
+            result['scene_name'] = self.scene_name
+        if self.webhook_id is not None:
+            result['webhook_id'] = self.webhook_id
+        if self.is_active is not None:
+            result['is_active'] = self.is_active
+        return result

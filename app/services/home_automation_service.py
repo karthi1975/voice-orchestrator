@@ -74,7 +74,8 @@ class HomeAutomationService:
         self,
         scene_id: str,
         home_id: Optional[str] = None,
-        source: str = "Voice Authentication"
+        source: str = "Voice Authentication",
+        webhook_id: Optional[str] = None
     ) -> SceneTriggerResult:
         """
         Trigger a Home Assistant scene.
@@ -83,6 +84,8 @@ class HomeAutomationService:
             scene_id: Scene identifier to trigger
             home_id: Home identifier (required for multi-tenant, optional for legacy)
             source: Source of the trigger
+            webhook_id: Scene-specific webhook ID override. If provided, uses this
+                        instead of the home's default ha_webhook_id.
 
         Returns:
             SceneTriggerResult with success status and message
@@ -91,8 +94,9 @@ class HomeAutomationService:
             ValueError: If home_id is required but not provided, or home not found
 
         Examples:
-            >>> # Multi-tenant usage
-            >>> result = service.trigger_scene("night_scene", home_id="home_1")
+            >>> # Multi-tenant with scene-specific webhook
+            >>> result = service.trigger_scene("decorations_on", home_id="home_1",
+            ...     webhook_id="decorations_on_1751404299018")
 
             >>> # Legacy usage (backward compatible)
             >>> result = service.trigger_scene("night_scene")
@@ -102,7 +106,7 @@ class HomeAutomationService:
             if not home_id:
                 raise ValueError("home_id is required for multi-tenant mode")
 
-            return self._trigger_via_factory(scene_id, home_id, source)
+            return self._trigger_via_factory(scene_id, home_id, source, webhook_id)
 
         # Legacy mode: use single client
         elif self._legacy_client:
@@ -116,7 +120,8 @@ class HomeAutomationService:
         self,
         scene_id: str,
         home_id: str,
-        source: str
+        source: str,
+        webhook_id: Optional[str] = None
     ) -> SceneTriggerResult:
         """
         Trigger scene using client factory (multi-tenant).
@@ -142,13 +147,16 @@ class HomeAutomationService:
                 )
 
             # Get home HA configuration
-            ha_url, ha_webhook_id = self._home_service.get_ha_config(home_id)
+            ha_url, ha_default_webhook_id = self._home_service.get_ha_config(home_id)
 
-            # Get client for this home
+            # Use scene-specific webhook if provided, otherwise home's default
+            effective_webhook_id = webhook_id or ha_default_webhook_id
+
+            # Get client for this home/webhook combination
             client = self._client_factory.get_client(
                 home_id=home_id,
                 ha_url=ha_url,
-                ha_webhook_id=ha_webhook_id
+                ha_webhook_id=effective_webhook_id
             )
 
             # Trigger scene

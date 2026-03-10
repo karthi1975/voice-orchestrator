@@ -108,6 +108,43 @@ class AlexaUserMappingModel(Base):
         return f"<AlexaUserMappingModel(alexa_user_id={self.alexa_user_id}, home_id={self.home_id})>"
 
 
+class SceneWebhookMappingModel(Base):
+    """
+    SQLAlchemy model for SceneWebhookMapping entity.
+
+    Maps scene names to Home Assistant webhook IDs per home.
+    """
+    __tablename__ = 'scene_webhook_mappings'
+
+    # Primary key
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+
+    # Foreign key to home
+    home_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey('homes.home_id'),
+        nullable=False,
+        index=True
+    )
+
+    # Scene fields
+    scene_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    webhook_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Composite indexes
+    __table_args__ = (
+        Index('idx_scene_home_name', 'home_id', 'scene_name', unique=True),
+        Index('idx_scene_home_active', 'home_id', 'is_active'),
+    )
+
+    def __repr__(self) -> str:
+        """String representation."""
+        return f"<SceneWebhookMappingModel(id={self.id}, home_id={self.home_id}, scene_name={self.scene_name})>"
+
+
 class ChallengeModel(Base):
     """
     SQLAlchemy model for Challenge entity.

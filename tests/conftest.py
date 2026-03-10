@@ -7,7 +7,7 @@ Fixtures available to all tests across the test suite.
 import pytest
 from datetime import datetime, timedelta
 from app.domain.enums import ClientType, ChallengeStatus
-from app.domain.models import Challenge, Home, Scene
+from app.domain.models import Challenge, Home, SceneWebhookMapping
 
 
 @pytest.fixture
@@ -76,11 +76,13 @@ def sample_home(fixed_datetime):
 
 
 @pytest.fixture
-def sample_scene():
-    """Sample scene for testing."""
-    return Scene(
-        scene_id="scene_night",
-        name="Night Scene",
+def sample_scene_mapping(fixed_datetime):
+    """Sample scene webhook mapping for testing."""
+    return SceneWebhookMapping(
+        id="mapping_1",
         home_id="home_1",
-        requires_auth=True
+        scene_name="decorations on",
+        webhook_id="decorations_on_1751404299018",
+        is_active=True,
+        created_at=fixed_datetime
     )

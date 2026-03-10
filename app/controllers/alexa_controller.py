@@ -84,6 +84,9 @@ class AlexaController(BaseController):
             if alexa_request.is_launch_request():
                 response = self._handle_launch()
 
+            elif alexa_request.is_intent_request('SceneActivationIntent'):
+                response = self._handle_scene_activation_intent(alexa_request)
+
             elif alexa_request.is_intent_request('NightSceneIntent'):
                 response = self._handle_night_scene_intent(alexa_request)
 
@@ -136,11 +139,11 @@ class AlexaController(BaseController):
         Returns:
             AlexaResponse with challenge
         """
-        # Request authentication
+        # Request authentication with explicit intent for scene lookup after auth
         auth_request = AuthenticationRequest(
             identifier=alexa_request.session_id,
             client_type=ClientType.ALEXA,
-            intent=None  # Intent is implicit for Alexa (night scene)
+            intent='night scene'
         )
 
         auth_response = self.auth_service.request_authentication(auth_request)
@@ -187,14 +190,22 @@ class AlexaController(BaseController):
                     should_end_session=True
                 )
 
+            # Get scene name from challenge intent (set during scene request)
+            scene_name = result.intent or 'night scene'
+
+            # Look up scene-specific webhook ID
+            webhook_id = self._get_scene_webhook(home_id, scene_name)
+
             scene_result = self.ha_service.trigger_scene(
-                scene_id='night_scene',
+                scene_id=scene_name,
                 home_id=home_id,
-                source='Alexa Voice Authentication'
+                source='Alexa Voice Authentication',
+                webhook_id=webhook_id
             )
 
+            display_name = scene_name.replace('_', ' ').title()
             if scene_result.success:
-                speech = "Voice verified. Night scene activated."
+                speech = f"Voice verified. {display_name} activated."
             else:
                 speech = f"Voice verified, but scene activation failed: {scene_result.message}"
 
@@ -204,11 +215,91 @@ class AlexaController(BaseController):
             )
         else:
             # Validation failed
-            speech = f"{result.message} Please try saying night scene again if you want to retry."
+            speech = f"{result.message} Please try saying the scene name again if you want to retry."
             return AlexaResponse(
                 speech_text=speech,
                 should_end_session=False
             )
+
+    def _handle_scene_activation_intent(self, alexa_request: AlexaRequest) -> AlexaResponse:
+        """
+        Handle dynamic scene activation request.
+
+        Extracts scene_name from slot and stores it in the challenge intent field
+        so it can be used after successful voice authentication.
+
+        Args:
+            alexa_request: Parsed Alexa request
+
+        Returns:
+            AlexaResponse with challenge
+        """
+        scene_name = alexa_request.get_slot_value('scene_name', '')
+
+        if not scene_name:
+            return AlexaResponse(
+                speech_text="Which scene would you like to activate? "
+                            "Try saying activate followed by the scene name.",
+                should_end_session=False
+            )
+
+        logger.info(f"Scene activation requested: {scene_name}")
+
+        # Request authentication with scene name stored in intent
+        auth_request = AuthenticationRequest(
+            identifier=alexa_request.session_id,
+            client_type=ClientType.ALEXA,
+            intent=scene_name.strip().lower()
+        )
+
+        auth_response = self.auth_service.request_authentication(auth_request)
+
+        return AlexaResponse(
+            speech_text=auth_response.speech_text,
+            should_end_session=False
+        )
+
+    def _get_scene_webhook(self, home_id: str, scene_name: str) -> str:
+        """
+        Look up scene-specific webhook_id from database.
+
+        Returns None to fall back to the home's default ha_webhook_id.
+
+        Args:
+            home_id: Home identifier
+            scene_name: Scene name to look up
+
+        Returns:
+            webhook_id or None if not found
+        """
+        try:
+            from app.config.settings import get_settings
+            from app.repositories.implementations.sqlalchemy_scene_webhook_mapping_repo import SQLAlchemySceneWebhookMappingRepository
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+
+            settings = get_settings()
+            engine = create_engine(settings.DATABASE_URL)
+            SessionLocal = sessionmaker(bind=engine)
+            session = SessionLocal()
+
+            try:
+                repo = SQLAlchemySceneWebhookMappingRepository(session)
+                normalized = scene_name.strip().lower()
+                mapping = repo.get_by_home_and_scene(home_id, normalized)
+
+                if mapping:
+                    logger.info(f"Found scene webhook: {scene_name} -> {mapping.webhook_id}")
+                    return mapping.webhook_id
+                else:
+                    logger.info(f"No scene webhook mapping for '{scene_name}' at home '{home_id}', using default")
+                    return None
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.error(f"Error looking up scene webhook: {str(e)}", exc_info=True)
+            return None
 
     def _get_home_id_for_alexa_user(self, alexa_user_id: str) -> str:
         """

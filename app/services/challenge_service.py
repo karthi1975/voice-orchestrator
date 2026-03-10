@@ -120,6 +120,9 @@ class ChallengeService:
         # Normalize phrase for consistent storage
         normalized_phrase = self._normalizer.normalize(phrase)
 
+        # Remove any existing challenge for this identifier (allows retries)
+        self._repository.delete_by_identifier(identifier, client_type)
+
         # Create challenge entity
         current_time = get_current_time()
         expires_at = calculate_expiry_time(

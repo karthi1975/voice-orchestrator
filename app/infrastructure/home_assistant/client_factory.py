@@ -68,9 +68,9 @@ class HomeAssistantClientFactory:
             >>> client = factory.get_client("home_1", "https://ha.local", "webhook_1")
             >>> client.trigger_scene("night_scene")
         """
-        # Create cache key from home_id and ha_url
-        # This ensures we create new client if HA URL changes for same home
-        cache_key = f"{home_id}:{ha_url}"
+        # Create cache key from home_id, ha_url, and webhook_id
+        # This ensures different scenes get different client instances
+        cache_key = f"{home_id}:{ha_url}:{ha_webhook_id}"
 
         if cache_key not in self._clients:
             logger.info(f"Creating new HA client for home '{home_id}' at {ha_url}")
