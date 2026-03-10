@@ -726,7 +726,6 @@
                                 <tr>
                                     <th>Home ID</th>
                                     <th>Name</th>
-                                    <th>User</th>
                                     <th>HA URL</th>
                                     <th>Webhook ID</th>
                                     <th>Status</th>
@@ -1159,9 +1158,8 @@
                 <tr>
                     <td><strong>${home.home_id}</strong></td>
                     <td>${home.name}</td>
-                    <td><span class="truncate" title="${home.user_id}">${home.user_id}</span></td>
-                    <td><span class="truncate" title="${home.ha_url}">${home.ha_url}</span></td>
-                    <td>${home.ha_webhook_id}</td>
+                    <td style="font-size: 13px;">${home.ha_url}</td>
+                    <td style="font-size: 13px;">${home.ha_webhook_id}</td>
                     <td>
                         <span class="badge ${home.is_active ? 'badge-success' : 'badge-error'}">
                             ${home.is_active ? 'Active' : 'Inactive'}
@@ -1176,11 +1174,13 @@
                     </td>
                     <td>
                         <div class="action-buttons">
-                            <button class="btn btn-icon btn-small" onclick="viewHomeScenes('${home.home_id}')" title="View Scenes">
-                                <span class="material-icons">movie</span>
-                            </button>
-                            <button class="btn btn-icon btn-small" onclick="editHome('${home.home_id}')" title="Edit">
+                            <button class="btn btn-primary btn-small" onclick="editHome('${home.home_id}')" title="Edit Home">
                                 <span class="material-icons">edit</span>
+                                Edit
+                            </button>
+                            <button class="btn btn-secondary btn-small" onclick="viewHomeScenes('${home.home_id}')" title="View Scenes">
+                                <span class="material-icons">movie</span>
+                                Scenes
                             </button>
                         </div>
                     </td>
