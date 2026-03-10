@@ -1213,8 +1213,49 @@
         }
 
         function editHome(homeId) {
-            // TODO: Implement edit functionality
-            showAlert('Edit functionality coming soon!', 'info');
+            const home = allHomes.find(h => h.home_id === homeId);
+            if (!home) return;
+
+            const newName = prompt('Home Name:', home.name);
+            if (newName === null) return;
+
+            const newHaUrl = prompt('Home Assistant URL:', home.ha_url);
+            if (newHaUrl === null) return;
+
+            const newWebhook = prompt('Default Webhook ID:', home.ha_webhook_id);
+            if (newWebhook === null) return;
+
+            // Only send changed fields
+            const updates = {};
+            if (newName !== home.name) updates.name = newName;
+            if (newHaUrl !== home.ha_url) updates.ha_url = newHaUrl;
+            if (newWebhook !== home.ha_webhook_id) updates.ha_webhook_id = newWebhook;
+
+            if (Object.keys(updates).length === 0) {
+                showAlert('No changes made', 'info');
+                return;
+            }
+
+            fetch(`${API_BASE}/homes/${homeId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates)
+            })
+            .then(response => {
+                if (response.ok) {
+                    showAlert(`Home "${homeId}" updated successfully!`, 'success');
+                    loadHomes();
+                    loadStats();
+                } else {
+                    return response.json().then(err => {
+                        showAlert(err.error || 'Failed to update home', 'error');
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error updating home:', error);
+                showAlert('Failed to update home', 'error');
+            });
         }
 
         function viewHomeScenes(homeId) {
