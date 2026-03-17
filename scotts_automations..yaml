@@ -1,0 +1,280 @@
+- id: '1743855173735'
+  alias: New automation
+  description: ''
+  triggers:
+  - trigger: time
+    at: 06:00:00
+  conditions:
+  - condition: time
+    weekday:
+    - mon
+    - tue
+    - wed
+    - thu
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - scene.good_morning
+  mode: single
+- id: '1751402792062'
+  alias: Weekday Morning Lights Off
+  description: ''
+  triggers:
+  - trigger: time
+    at: 08:00:00
+  conditions:
+  - condition: time
+    weekday:
+    - mon
+    - tue
+    - wed
+    - thu
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - scene.good_night
+  mode: single
+- id: '1751402938329'
+  alias: Weekend Morning Lights Off
+  description: ''
+  triggers:
+  - trigger: time
+    at: 09:00:00
+  conditions:
+  - condition: time
+    weekday:
+    - sun
+    - sat
+    - fri
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - scene.good_night
+  mode: single
+- id: '1751404631954'
+  alias: Inside Lights On before Sunset
+  description: ''
+  triggers:
+  - trigger: sun
+    event: sunset
+    offset: '-900'
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - scene.good_morning
+  mode: single
+- id: '1751405011005'
+  alias: Lights Off at Night
+  description: ''
+  triggers:
+  - trigger: time
+    at: '23:00:00'
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - scene.good_night
+      - scene.outside_lights_off
+      - scene.decorations_off
+  mode: single
+- id: '1751405515350'
+  alias: Outside Lights on at Sunset
+  description: ''
+  triggers:
+  - trigger: sun
+    event: sunset
+    offset: 0
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - scene.outside_lights_on
+      - scene.decorations_on
+  mode: single
+- id: '1764852567036'
+  alias: Morning outside lights on
+  description: ''
+  triggers:
+  - trigger: time
+    at: 06:00:00
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - scene.outside_lights_on
+      - scene.decorations_on
+  mode: single
+- id: '1764852756268'
+  alias: Morning Outside lights off
+  description: ''
+  triggers:
+  - trigger: time
+    at: 08:00:00
+  conditions: []
+  actions:
+  - action: scene.turn_on
+    metadata: {}
+    data: {}
+    target:
+      entity_id:
+      - scene.outside_lights_off
+      - scene.decorations_off
+  mode: single
+- id: '1765846975822'
+  alias: Shut off Red LIght
+  description: ''
+  triggers:
+  - trigger: time
+    at: '22:30:00'
+  conditions: []
+  actions:
+  - action: light.turn_off
+    metadata: {}
+    target:
+      entity_id: light.red_light
+    data: {}
+  mode: single
+- id: '1765847355829'
+  alias: Red Light on at Bedtime
+  description: ''
+  triggers:
+  - trigger: time
+    at: '21:30:00'
+  conditions: []
+  actions:
+  - action: light.turn_on
+    metadata: {}
+    target:
+      entity_id: light.red_light
+    data: {}
+  mode: single
+- id: '1765919432951'
+  alias: ZUUFirePitLightsPower
+  description: ''
+  triggers:
+  - trigger: event
+    event_type: switch.back_patio_lights-power
+  conditions: []
+  actions:
+  - action: switch.toggle
+    target:
+      entity_id: switch.back_patio_lights
+  mode: single
+- id: '1765931972536'
+  alias: ZUULRLeftLampPower
+  description: ''
+  triggers:
+  - trigger: event
+    event_type: light.living_room_left_lamp-power
+  conditions: []
+  actions:
+  - action: light.toggle
+    metadata: {}
+    target:
+      entity_id: light.living_room_left_lamp
+    data: {}
+  mode: single
+- id: '1765932401902'
+  alias: ZUULRRightLampPower
+  description: ''
+  triggers:
+  - trigger: event
+    event_type: light.living_room_right_lamp-power
+  conditions: []
+  actions:
+  - action: light.toggle
+    metadata: {}
+    target:
+      entity_id: light.living_room_right_lamp
+    data: {}
+  mode: single
+- id: '1770209372029'
+  alias: UToggleBatsign
+  description: ''
+  triggers:
+  - trigger: event
+    event_type: switch.bat_sign-power
+  conditions: []
+  actions:
+  - type: toggle
+    device_id: 6b86cd8c539ad69b193a8ff2acbf3b4e
+    entity_id: 14c6e3b70efdee829204e7fd690d2173
+    domain: switch
+  mode: single
+- id: '1772577080625'
+  alias: ZUULightAutomation
+  description: ''
+  triggers:
+  - trigger: webhook
+    allowed_methods:
+    - POST
+    - PUT
+    local_only: true
+    webhook_id: -M-22Co-2Mxo_JuzWnUGRUSpy
+  conditions:
+  - condition: device
+    type: is_off
+    device_id: 676fadec3f89f4d7d1646e3c87ad1dc8
+    entity_id: 698294142d63300cc8dd3eec6991617f
+    domain: switch
+  actions:
+  - type: turn_on
+    device_id: 676fadec3f89f4d7d1646e3c87ad1dc8
+    entity_id: 698294142d63300cc8dd3eec6991617f
+    domain: switch
+  mode: single
+- id: '1751404299018'
+  alias: Decorations On - Webhook
+  description: Turns on Back Deck and Front Porch plugs via webhook from voice orchestrator
+  trigger:
+  - platform: webhook
+    webhook_id: decorations_on_1751404299018
+    allowed_methods:
+    - POST
+    local_only: false
+  action:
+  - service: switch.turn_on
+    target:
+      entity_id: switch.back_deck_lights
+  - service: switch.turn_on
+    target:
+      entity_id: switch.front_porch_lights
+                                                                                                                              
+- id: '1751404299019'
+  alias: Decorations Off - Webhook
+  description: Turns off Back Deck and Front Porch plugs via webhook from voice orchestrator
+  trigger:
+  - platform: webhook
+    webhook_id: decorations_off_1751404299019
+    allowed_methods:
+    - POST
+    local_only: false
+  action:
+  - service: switch.turn_off
+    target:
+      entity_id: switch.back_deck_lights
+  - service: switch.turn_off
+    target:
+      entity_id: switch.front_porch_lights

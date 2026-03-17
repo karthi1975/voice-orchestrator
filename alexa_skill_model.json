@@ -82,8 +82,8 @@
             "name": "SCENE_NAME",
             "values": [
               { "name": { "value": "night scene", "synonyms": ["night mode", "bedtime", "bedtime mode"] } },
-              { "name": { "value": "decorations on", "synonyms": ["Christmas lights", "holiday lights", "decorations"] } },
-              { "name": { "value": "decorations off", "synonyms": ["lights off", "holiday off"] } },
+              { "name": { "value": "decorations on", "synonyms": ["Christmas lights", "holiday lights", "decorations", "holidays on"] } },
+              { "name": { "value": "decorations off", "synonyms": ["lights off", "holiday off", "holidays off"] } },
               { "name": { "value": "movie mode", "synonyms": ["movie time", "movie night"] } },
               { "name": { "value": "good morning", "synonyms": ["morning mode", "wake up"] } }
             ]
