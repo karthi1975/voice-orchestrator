@@ -93,7 +93,7 @@ class AlexaResponse(BaseDTO):
             AlexaResponse for skill launch
         """
         return cls(
-            speech_text="Home security activated. Say night scene to begin.",
+            speech_text="Home security activated. Say a scene name to begin. For example, decorations on or night scene.",
             should_end_session=False
         )
 

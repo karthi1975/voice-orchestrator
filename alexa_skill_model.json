@@ -1,139 +1,353 @@
 {
-    "interactionModel": {
+  "interactionModel": {
       "languageModel": {
-        "invocationName": "voice guard",
-        "intents": [
-          {
-            "name": "NightSceneIntent",
-            "slots": [],
-            "samples": [
-              "night scene",
-              "activate night scene",
-              "turn on night scene",
-              "bedtime",
-              "bedtime mode",
-              "activate bedtime",
-              "start night mode",
-              "night mode"
-            ]
-          },
-          {
-            "name": "ChallengeResponseIntent",
-            "slots": [
+          "invocationName": "voice guard",
+          "intents": [
               {
-                "name": "response",
-                "type": "CHALLENGE_PHRASE"
-              }
-            ],
-            "samples": [
-              "{response}",
-              "the phrase is {response}",
-              "my response is {response}",
-              "I say {response}",
-              "the answer is {response}",
-              "it is {response}",
-              "my phrase is {response}",
-              "the code is {response}"
-            ]
-          },
-          {
-            "name": "SceneActivationIntent",
-            "slots": [
+                  "name": "NightSceneIntent",
+                  "slots": [],
+                  "samples": [
+                      "night scene",
+                      "activate night scene",
+                      "turn on night scene",
+                      "bedtime",
+                      "bedtime mode",
+                      "activate bedtime",
+                      "start night mode",
+                      "night mode"
+                  ]
+              },
               {
-                "name": "scene_name",
-                "type": "SCENE_NAME"
+                  "name": "ChallengeResponseIntent",
+                  "slots": [
+                      {
+                          "name": "response",
+                          "type": "CHALLENGE_PHRASE"
+                      }
+                  ],
+                  "samples": [
+                      "{response}",
+                      "the phrase is {response}",
+                      "my response is {response}",
+                      "I say {response}",
+                      "the answer is {response}",
+                      "it is {response}",
+                      "my phrase is {response}",
+                      "the code is {response}"
+                  ]
+              },
+              {
+                  "name": "SceneActivationIntent",
+                  "slots": [
+                      {
+                          "name": "scene_name",
+                          "type": "SCENE_NAME"
+                      }
+                  ],
+                  "samples": [
+                      "activate {scene_name}",
+                      "turn on {scene_name}",
+                      "turn off {scene_name}",
+                      "start {scene_name}",
+                      "stop {scene_name}",
+                      "{scene_name}",
+                      "set {scene_name}",
+                      "trigger {scene_name}",
+                      "run {scene_name}",
+                      "enable {scene_name}",
+                      "disable {scene_name}",
+                      "switch on {scene_name}",
+                      "switch off {scene_name}",
+                      "deactivate {scene_name}"
+                  ]
+              },
+              {
+                  "name": "AMAZON.CancelIntent",
+                  "samples": []
+              },
+              {
+                  "name": "AMAZON.HelpIntent",
+                  "samples": []
+              },
+              {
+                  "name": "AMAZON.StopIntent",
+                  "samples": []
+              },
+              {
+                  "name": "AMAZON.FallbackIntent",
+                  "samples": []
+              },
+              {
+                  "name": "AMAZON.NavigateHomeIntent",
+                  "samples": []
               }
-            ],
-            "samples": [
-              "activate {scene_name}",
-              "turn on {scene_name}",
-              "start {scene_name}",
-              "{scene_name}",
-              "set {scene_name}",
-              "trigger {scene_name}",
-              "run {scene_name}",
-              "enable {scene_name}",
-              "switch on {scene_name}"
-            ]
-          },
-          {
-            "name": "AMAZON.CancelIntent",
-            "samples": []
-          },
-          {
-            "name": "AMAZON.HelpIntent",
-            "samples": []
-          },
-          {
-            "name": "AMAZON.StopIntent",
-            "samples": []
-          },
-          {
-            "name": "AMAZON.FallbackIntent",
-            "samples": []
-          },
-          {
-            "name": "AMAZON.NavigateHomeIntent",
-            "samples": []
-          }
-        ],
-        "types": [
-          {
-            "name": "SCENE_NAME",
-            "values": [
-              { "name": { "value": "night scene", "synonyms": ["night mode", "bedtime", "bedtime mode"] } },
-              { "name": { "value": "decorations on", "synonyms": ["Christmas lights", "holiday lights", "decorations", "holidays on"] } },
-              { "name": { "value": "decorations off", "synonyms": ["lights off", "holiday off", "holidays off"] } },
-              { "name": { "value": "movie mode", "synonyms": ["movie time", "movie night"] } },
-              { "name": { "value": "good morning", "synonyms": ["morning mode", "wake up"] } }
-            ]
-          },
-          {
-            "name": "CHALLENGE_PHRASE",
-            "values": [
-              { "name": { "value": "apple one" } },
-              { "name": { "value": "apple five" } },
-              { "name": { "value": "banana two" } },
-              { "name": { "value": "banana seven" } },
-              { "name": { "value": "dolphin three" } },
-              { "name": { "value": "dolphin nine" } },
-              { "name": { "value": "elephant four" } },
-              { "name": { "value": "elephant eight" } },
-              { "name": { "value": "flower five" } },
-              { "name": { "value": "flower one" } },
-              { "name": { "value": "garden six" } },
-              { "name": { "value": "garden three" } },
-              { "name": { "value": "island seven" } },
-              { "name": { "value": "island two" } },
-              { "name": { "value": "jungle eight" } },
-              { "name": { "value": "jungle four" } },
-              { "name": { "value": "kitchen nine" } },
-              { "name": { "value": "kitchen six" } },
-              { "name": { "value": "lemon zero" } },
-              { "name": { "value": "lemon five" } },
-              { "name": { "value": "mountain one" } },
-              { "name": { "value": "mountain seven" } },
-              { "name": { "value": "ocean four" } },
-              { "name": { "value": "ocean nine" } },
-              { "name": { "value": "piano two" } },
-              { "name": { "value": "piano eight" } },
-              { "name": { "value": "rainbow three" } },
-              { "name": { "value": "rainbow six" } },
-              { "name": { "value": "sunset five" } },
-              { "name": { "value": "sunset zero" } },
-              { "name": { "value": "thunder seven" } },
-              { "name": { "value": "thunder one" } },
-              { "name": { "value": "umbrella four" } },
-              { "name": { "value": "umbrella nine" } },
-              { "name": { "value": "village two" } },
-              { "name": { "value": "village eight" } },
-              { "name": { "value": "window three" } },
-              { "name": { "value": "window six" } },
-              { "name": { "value": "zebra zero" } },
-              { "name": { "value": "zebra five" } }
-            ]
-          }
-        ]
+          ],
+          "types": [
+              {
+                  "name": "SCENE_NAME",
+                  "values": [
+                      {
+                          "name": {
+                              "value": "night scene",
+                              "synonyms": [
+                                  "night mode",
+                                  "bedtime",
+                                  "bedtime mode"
+                              ]
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "decorations on",
+                              "synonyms": [
+                                  "Christmas lights",
+                                  "holiday lights",
+                                  "decorations",
+                                  "holidays on",
+                                  "turn on holidays"
+                              ]
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "no decorations",
+                              "synonyms": [
+                                  "stop decorations",
+                                  "decorations down",
+                                  "holidays done",
+                                  "holidays stop",
+                                  "stop holidays",
+                                  "end decorations",
+                                  "turn off holidays"
+                              ]
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "movie mode",
+                              "synonyms": [
+                                  "movie time",
+                                  "movie night"
+                              ]
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "good morning",
+                              "synonyms": [
+                                  "morning mode",
+                                  "wake up"
+                              ]
+                          }
+                      }
+                  ]
+              },
+              {
+                  "name": "CHALLENGE_PHRASE",
+                  "values": [
+                      {
+                          "name": {
+                              "value": "apple one"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "apple five"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "banana two"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "banana seven"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "dolphin three"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "dolphin nine"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "elephant four"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "elephant eight"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "flower five"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "flower one"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "garden six"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "garden three"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "island seven"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "island two"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "jungle eight"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "jungle four"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "kitchen nine"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "kitchen six"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "lemon zero"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "lemon five"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "mountain one"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "mountain seven"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "ocean four"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "ocean nine"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "piano two"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "piano eight"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "rainbow three"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "rainbow six"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "sunset five"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "sunset zero"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "thunder seven"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "thunder one"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "umbrella four"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "umbrella nine"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "village two"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "village eight"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "window three"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "window six"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "zebra zero"
+                          }
+                      },
+                      {
+                          "name": {
+                              "value": "zebra five"
+                          }
+                      }
+                  ]
+              }
+          ]
       }
-    }
-  }                                 
+  }
+}
