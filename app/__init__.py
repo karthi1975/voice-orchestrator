@@ -22,6 +22,8 @@ from app.services.home_automation_service import HomeAutomationService
 # Controllers
 from app.controllers.alexa_controller import AlexaController
 from app.controllers.fph_controller import FutureProofHomesController
+from app.controllers.smarthome_controller import SmartHomeController
+from app.controllers.oauth_controller import OAuthController
 
 # Utils
 from app.utils.text_normalizer import TextNormalizer
@@ -153,6 +155,9 @@ class DependencyContainer:
             from app.repositories.implementations.sqlalchemy_scene_webhook_mapping_repo import SQLAlchemySceneWebhookMappingRepository
             self.scene_mapping_repository = SQLAlchemySceneWebhookMappingRepository(self._db_session)
 
+            from app.repositories.implementations.sqlalchemy_oauth_token_repo import SQLAlchemyOAuthTokenRepository
+            self.oauth_token_repository = SQLAlchemyOAuthTokenRepository(self._db_session)
+
             logger.info("Repositories initialized (SQLAlchemy/PostgreSQL)")
         else:
             # Use in-memory repositories (default)
@@ -167,6 +172,9 @@ class DependencyContainer:
 
             from app.repositories.implementations.in_memory_scene_webhook_mapping_repo import InMemorySceneWebhookMappingRepository
             self.scene_mapping_repository = InMemorySceneWebhookMappingRepository()
+
+            from app.repositories.implementations.in_memory_oauth_token_repo import InMemoryOAuthTokenRepository
+            self.oauth_token_repository = InMemoryOAuthTokenRepository()
 
             logger.info("Repositories initialized (in-memory)")
 
@@ -213,6 +221,12 @@ class DependencyContainer:
         self.scene_mapping_service = SceneWebhookMappingService(
             mapping_repository=self.scene_mapping_repository,
             home_repository=self.home_repository
+        )
+
+        # OAuth service
+        from app.services.oauth_service import OAuthService
+        self.oauth_service = OAuthService(
+            oauth_token_repository=self.oauth_token_repository
         )
 
         # Challenge service (depends on repository)
@@ -282,7 +296,21 @@ class DependencyContainer:
             admin_auth_service=self.admin_auth_service
         )
 
-        logger.info("Controllers initialized (Alexa, FPH, Admin, Auth)")
+        # Smart Home controller for MCS
+        self.smarthome_controller = SmartHomeController(
+            oauth_service=self.oauth_service,
+            scene_mapping_service=self.scene_mapping_service,
+            ha_service=self.ha_service,
+            home_service=self.home_service
+        )
+
+        # OAuth controller for account linking
+        self.oauth_controller = OAuthController(
+            oauth_service=self.oauth_service,
+            home_service=self.home_service
+        )
+
+        logger.info("Controllers initialized (Alexa, FPH, Admin, Auth, SmartHome, OAuth)")
 
 
 def create_app(config: Optional[dict] = None) -> Flask:

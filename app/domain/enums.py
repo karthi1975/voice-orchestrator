@@ -16,6 +16,7 @@ class ClientType(str, Enum):
         FUTUREPROOFHOME: FutureProof Homes integration (home_id-based)
     """
     ALEXA = "alexa"
+    ALEXA_SMARTHOME = "alexa_smarthome"
     FUTUREPROOFHOME = "futureproofhome"
 
 

@@ -41,6 +41,8 @@ app.register_blueprint(container.alexa_controller.blueprint, url_prefix='/alexa/
 app.register_blueprint(container.fph_controller.blueprint, url_prefix='/futureproofhome/v2', name='futureproofhome_v2')
 app.register_blueprint(container.admin_controller.blueprint)
 app.register_blueprint(container.auth_controller.blueprint)
+app.register_blueprint(container.smarthome_controller.blueprint, name='alexa_smarthome')
+app.register_blueprint(container.oauth_controller.blueprint)
 
 # Setup authentication middleware
 setup_auth_middleware(app)

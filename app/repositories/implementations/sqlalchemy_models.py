@@ -131,6 +131,7 @@ class SceneWebhookMappingModel(Base):
     scene_name: Mapped[str] = mapped_column(String(255), nullable=False)
     webhook_id: Mapped[str] = mapped_column(String(500), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    smarthome_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default='true')
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -143,6 +144,28 @@ class SceneWebhookMappingModel(Base):
     def __repr__(self) -> str:
         """String representation."""
         return f"<SceneWebhookMappingModel(id={self.id}, home_id={self.home_id}, scene_name={self.scene_name})>"
+
+
+class OAuthTokenModel(Base):
+    """
+    SQLAlchemy model for OAuthToken entity.
+
+    Stores OAuth2 tokens for Smart Home API authorization.
+    """
+    __tablename__ = 'oauth_tokens'
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    home_id: Mapped[str] = mapped_column(String(255), ForeignKey('homes.home_id'), nullable=False, index=True)
+    access_token: Mapped[str] = mapped_column(String(2000), nullable=False, unique=True, index=True)
+    refresh_token: Mapped[str] = mapped_column(String(2000), nullable=False, unique=True)
+    token_type: Mapped[str] = mapped_column(String(50), nullable=False, default='bearer')
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    amazon_user_id: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<OAuthTokenModel(id={self.id}, home_id={self.home_id})>"
 
 
 class ChallengeModel(Base):

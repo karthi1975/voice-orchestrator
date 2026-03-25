@@ -154,6 +154,7 @@ class SceneWebhookMapping:
     scene_name: str
     webhook_id: str
     is_active: bool = True
+    smarthome_enabled: bool = True
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: Optional[datetime] = None
 
@@ -174,5 +175,35 @@ class AlexaUserMapping:
     """
     alexa_user_id: str
     home_id: str
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: Optional[datetime] = None
+
+
+@dataclass
+class OAuthToken:
+    """
+    OAuth token entity for Smart Home API authorization.
+
+    Stores OAuth2 tokens issued during Alexa account linking,
+    used to authenticate Smart Home API directive requests.
+
+    Attributes:
+        id: Unique token identifier (UUID)
+        home_id: Home this token is associated with
+        access_token: OAuth2 access token
+        refresh_token: OAuth2 refresh token
+        token_type: Token type (default: bearer)
+        expires_at: When the access token expires
+        amazon_user_id: Optional Amazon user ID from account linking
+        created_at: When the token was created
+        updated_at: When the token was last updated
+    """
+    id: str
+    home_id: str
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_at: datetime = field(default_factory=datetime.now)
+    amazon_user_id: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: Optional[datetime] = None

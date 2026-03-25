@@ -58,6 +58,7 @@ def setup_auth_middleware(app):
         public_paths = [
             '/alexa',
             '/futureproofhome',
+            '/oauth',
             '/health',
             '/',
             '/static/privacy-policy.html',
