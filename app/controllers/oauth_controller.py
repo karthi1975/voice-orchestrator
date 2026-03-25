@@ -109,7 +109,7 @@ class OAuthController(BaseController):
 
         Form data: home_id, pin, redirect_uri, state
         """
-        home_id = request.form.get('home_id', '').strip()
+        home_id = request.form.get('home_id', '').strip().lower()
         pin = request.form.get('pin', '')
         redirect_uri = request.form.get('redirect_uri', '')
         state = request.form.get('state', '')
