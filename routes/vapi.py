@@ -32,7 +32,7 @@ VAPI response shape:
 
 import logging
 import os
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify
 from challenge import (
     generate_challenge,
     store_challenge,
@@ -40,12 +40,22 @@ from challenge import (
     get_challenge_data,
 )
 from config import MAX_ATTEMPTS
+from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
 
 logger = logging.getLogger(__name__)
 vapi_bp = Blueprint("vapi", __name__)
 
 CLIENT_TYPE = "vapi"
 VAPI_SECRET = os.environ.get("VAPI_WEBHOOK_SECRET")
+
+_dispatcher: HADirectDispatcher | None = None
+
+
+def _get_dispatcher() -> HADirectDispatcher:
+    global _dispatcher
+    if _dispatcher is None:
+        _dispatcher = HADirectDispatcher.from_env()
+    return _dispatcher
 
 
 def _unwrap(req):
@@ -143,46 +153,19 @@ def vapi_verify():
         )
 
         if is_valid:
-            container = getattr(current_app, "container", None)
             scene_name = intent or ""
-            webhook_id = None
-            success = False
-            fail_message = ""
-
-            if container is not None:
-                try:
-                    webhook_id = container.scene_mapping_service.get_webhook_for_scene(
-                        home_id, scene_name
-                    )
-                except Exception as e:
-                    logger.warning(f"VAPI webhook lookup failed: {e}")
-
-                try:
-                    result = container.ha_service.trigger_scene(
-                        scene_id=scene_name,
-                        home_id=home_id,
-                        source="VAPI Voice Authentication",
-                        webhook_id=webhook_id,
-                    )
-                    success = result.success
-                    fail_message = result.message
-                except Exception as e:
-                    logger.error(f"VAPI trigger failed: {e}", exc_info=True)
-                    fail_message = str(e)
-            else:
-                fail_message = "Orchestrator not ready."
-
-            display = scene_name.replace("_", " ").strip() or "Scene"
+            result = _get_dispatcher().dispatch(home_id, scene_name)
+            display = scene_name.strip() or "Scene"
             speech = (
-                f"{display} activated." if success
-                else f"Scene activation failed. {fail_message}"
+                f"{display} activated." if result.success
+                else f"Scene activation failed. {result.message}"
             )
             logger.info(
                 f"VAPI verify approved - home={home_id} scene={scene_name} "
-                f"success={success}"
+                f"success={result.success} status={result.status_code}"
             )
             return _ok(p["tool_id"], {
-                "status": "approved" if success else "error",
+                "status": "approved" if result.success else "error",
                 "speech": speech,
                 "intent": scene_name,
                 "end_call": True,

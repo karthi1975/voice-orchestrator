@@ -93,6 +93,17 @@ LOG_RESPONSE_BODY=false
 
 # VAPI integration (X-Vapi-Secret header enforcement)
 VAPI_WEBHOOK_SECRET=41c9db6232f26141c5a601e459ed229af9cf1bb3d6a8553435384101016c1235
+
+# HA Direct Dispatcher — single-webhook ingress, per-home REST API egress.
+# HOME_CONFIGS_JSON holds per-home HA URL + long-lived bearer token. Kept
+# empty in git; set on the droplet with: printf '\nHOME_CONFIGS_JSON=...\n' >> .env
+HOME_CONFIGS_JSON={}
+
+# Maps VAPI scene_name -> (HA service, entity suffix). Edit to add scenes.
+SCENE_CATALOG_JSON={"night scene":{"service":"scene","entity":"night_mode"},"decorations on":{"service":"script","entity":"decorations_on"},"no decorations":{"service":"script","entity":"decorations_off"},"movie mode":{"service":"scene","entity":"movie"},"good morning":{"service":"scene","entity":"good_morning"}}
+
+# Per-home overrides for scenes whose entity IDs diverge from the catalog.
+HOME_SCENE_OVERRIDES_JSON={}
 ENVEOF
 echo "✓ Configuration created"
 
