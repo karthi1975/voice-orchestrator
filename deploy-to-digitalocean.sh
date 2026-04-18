@@ -90,6 +90,9 @@ USE_DATABASE=false
 LOG_LEVEL=INFO
 LOG_REQUEST_BODY=false
 LOG_RESPONSE_BODY=false
+
+# VAPI integration (X-Vapi-Secret header enforcement)
+VAPI_WEBHOOK_SECRET=41c9db6232f26141c5a601e459ed229af9cf1bb3d6a8553435384101016c1235
 ENVEOF
 echo "✓ Configuration created"
 
