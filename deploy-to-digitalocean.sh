@@ -105,6 +105,19 @@ SCENE_CATALOG_JSON={"night scene":{"service":"scene","entity":"night_mode"},"dec
 # Per-home overrides for scenes whose entity IDs diverge from the catalog.
 HOME_SCENE_OVERRIDES_JSON={}
 ENVEOF
+
+# Merge .env.local if it exists (droplet-resident, gitignored, survives redeploys).
+# Later keys override earlier ones in Docker --env-file, so this lets ops-only
+# secrets (HOME_CONFIGS_JSON, HOME_SCENE_OVERRIDES_JSON, etc.) stay out of git
+# while still landing in the container's environment.
+if [ -f .env.local ]; then
+    echo "" >> .env
+    echo "# --- Merged from .env.local (not in git) ---" >> .env
+    cat .env.local >> .env
+    echo "✓ Merged .env.local ($(wc -l < .env.local | tr -d ' ') lines)"
+else
+    echo "ℹ No .env.local found — only baked-in defaults active"
+fi
 echo "✓ Configuration created"
 
 # Build Docker image
