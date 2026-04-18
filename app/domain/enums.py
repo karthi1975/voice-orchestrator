@@ -18,6 +18,7 @@ class ClientType(str, Enum):
     ALEXA = "alexa"
     ALEXA_SMARTHOME = "alexa_smarthome"
     FUTUREPROOFHOME = "futureproofhome"
+    VAPI = "vapi"
 
 
 class ChallengeStatus(str, Enum):

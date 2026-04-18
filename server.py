@@ -12,6 +12,7 @@ from home_assistant import test_connection
 # Import legacy blueprints
 from routes.alexa import alexa_bp
 from routes.futureproofhome import futureproofhome_bp
+from routes.vapi import vapi_bp
 
 # Import new SOLID architecture dependency container
 from app import DependencyContainer
@@ -30,6 +31,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 # Register legacy blueprints (backward compatibility)
 app.register_blueprint(alexa_bp, url_prefix='/alexa')
 app.register_blueprint(futureproofhome_bp, url_prefix='/futureproofhome')
+app.register_blueprint(vapi_bp, url_prefix='/vapi')
 
 # Register new SOLID architecture routes (parallel for testing)
 # Create dependency container (without Flask app - we'll register to main app)
