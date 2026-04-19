@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VoiceGuard — Scott's Home</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #1a2744 0%, #0b1220 45%, #060a14 100%);
+    color: #e6ecff; display: flex; flex-direction: column; align-items: center; padding: 40px 20px;
+  }
+  header { text-align: center; margin-bottom: 32px; }
+  h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: 0.2px; }
+  .sub { color: #8ea0c6; font-size: 14px; }
+  .card {
+    width: 100%; max-width: 560px; background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  }
+  .talk {
+    display: block; width: 100%; padding: 18px; margin-top: 8px;
+    background: linear-gradient(180deg, #2f7dff 0%, #1e5cd1 100%);
+    border: 0; border-radius: 12px; color: white; font-size: 18px; font-weight: 600;
+    cursor: pointer; transition: transform .08s ease, filter .15s ease;
+  }
+  .talk:hover:not(:disabled) { filter: brightness(1.08); }
+  .talk:active:not(:disabled) { transform: translateY(1px); }
+  .talk:disabled { opacity: .45; cursor: not-allowed; }
+  .talk.live { background: linear-gradient(180deg, #ff5252 0%, #c62828 100%); }
+  .status { margin-top: 16px; font-size: 14px; color: #8ea0c6; min-height: 18px; text-align: center; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #4caf50; margin-right: 6px; vertical-align: middle; }
+  .dot.idle { background: #556; }
+  .dot.connecting { background: #ffa726; animation: pulse 1s infinite; }
+  .dot.live { background: #ff5252; animation: pulse 1s infinite; }
+  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.35; } 100% { opacity: 1; } }
+  .transcript {
+    margin-top: 20px; background: rgba(0,0,0,0.3); border-radius: 10px; padding: 12px 14px;
+    max-height: 280px; overflow-y: auto; font-size: 13px; line-height: 1.55;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .transcript:empty::before { content: "Transcript will appear here."; color: #556; }
+  .line { margin: 2px 0; }
+  .line.user { color: #9cc3ff; }
+  .line.assistant { color: #c9f2c9; }
+  .line.system { color: #7a8499; font-style: italic; }
+  .line.error { color: #ff9a9a; }
+  .examples { margin-top: 14px; font-size: 13px; color: #7a8499; }
+  .examples code { background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; color: #c9d6ef; }
+  footer { margin-top: 24px; color: #4a5578; font-size: 12px; text-align: center; }
+  .err {
+    margin-top: 14px; padding: 10px 14px; background: #3a1414; color: #ffb3b3;
+    border: 1px solid #552020; border-radius: 8px; font-size: 13px; display: none;
+  }
+  .err.show { display: block; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>VoiceGuard</h1>
+    <div class="sub">Scott's home &middot; voice-authenticated scene activation</div>
+  </header>
+
+  <div class="card">
+    <button id="talkBtn" class="talk" disabled>Connecting…</button>
+
+    <div class="status"><span id="dot" class="dot idle"></span><span id="statusText">Initializing…</span></div>
+
+    <div id="errBox" class="err"></div>
+
+    <div class="transcript" id="transcript"></div>
+
+    <div class="examples">
+      Try: <code>decorations on</code> &middot; <code>decorations off</code> &middot; <code>good morning</code>
+      <br />Then repeat the security phrase when prompted.
+    </div>
+  </div>
+
+  <footer>home_id locked to <strong>scott_home</strong> &middot; orchestrator: voiceorchestrator.homeadapt.us</footer>
+
+<script type="module">
+  import Vapi from "https://cdn.jsdelivr.net/npm/@vapi-ai/web/+esm";
+
+  const talkBtn = document.getElementById("talkBtn");
+  const dot = document.getElementById("dot");
+  const statusText = document.getElementById("statusText");
+  const transcript = document.getElementById("transcript");
+  const errBox = document.getElementById("errBox");
+
+  const setStatus = (cls, text) => { dot.className = "dot " + cls; statusText.textContent = text; };
+  const log = (who, text) => {
+    const d = document.createElement("div");
+    d.className = "line " + who;
+    d.textContent = (who === "user" ? "You: " : who === "assistant" ? "VoiceGuard: " : "") + text;
+    transcript.appendChild(d);
+    transcript.scrollTop = transcript.scrollHeight;
+  };
+  const showError = (msg) => { errBox.textContent = msg; errBox.classList.add("show"); };
+
+  let vapi = null;
+  let config = null;
+  let live = false;
+
+  async function init() {
+    try {
+      const r = await fetch("/vapi/demo-config", { cache: "no-store" });
+      if (!r.ok) throw new Error("Config endpoint " + r.status);
+      config = await r.json();
+      if (!config.publicKey) throw new Error("VAPI_PUBLIC_KEY not configured on server.");
+      if (!config.assistantId) throw new Error("VAPI_ASSISTANT_ID not configured on server.");
+
+      vapi = new Vapi(config.publicKey);
+
+      vapi.on("call-start", () => {
+        live = true;
+        talkBtn.textContent = "End Call";
+        talkBtn.classList.add("live");
+        setStatus("live", "Listening…");
+      });
+      vapi.on("call-end", () => {
+        live = false;
+        talkBtn.textContent = "Talk";
+        talkBtn.classList.remove("live");
+        setStatus("idle", "Idle. Click Talk to start.");
+      });
+      vapi.on("speech-start", () => setStatus("live", "VoiceGuard speaking…"));
+      vapi.on("speech-end",   () => setStatus("live", "Listening…"));
+      vapi.on("message", (m) => {
+        if (m.type === "transcript" && m.transcriptType === "final") {
+          log(m.role === "user" ? "user" : "assistant", m.transcript);
+        } else if (m.type === "tool-calls") {
+          const names = (m.toolCallList || []).map(t => t.function?.name).join(", ");
+          if (names) log("system", "→ tool: " + names);
+        } else if (m.type === "status-update") {
+          // quiet
+        }
+      });
+      vapi.on("error", (e) => {
+        console.error(e);
+        showError("VAPI error: " + (e?.message || JSON.stringify(e)));
+        setStatus("idle", "Error.");
+      });
+
+      talkBtn.disabled = false;
+      talkBtn.textContent = "Talk";
+      setStatus("idle", "Idle. Click Talk to start.");
+    } catch (e) {
+      console.error(e);
+      showError("Init failed: " + e.message);
+      setStatus("idle", "Init failed.");
+    }
+  }
+
+  talkBtn.addEventListener("click", async () => {
+    if (!vapi) return;
+    if (live) { vapi.stop(); return; }
+    errBox.classList.remove("show");
+    setStatus("connecting", "Connecting…");
+    try {
+      await vapi.start(config.assistantId, {
+        variableValues: { home_id: config.homeId || "scott_home" }
+      });
+    } catch (e) {
+      console.error(e);
+      showError("Start failed: " + (e?.message || e));
+      setStatus("idle", "Idle. Click Talk to start.");
+    }
+  });
+
+  init();
+</script>
+</body>
+</html>

@@ -91,6 +91,19 @@ def _authorized(req):
     return req.headers.get("X-Vapi-Secret") == VAPI_SECRET
 
 
+@vapi_bp.route("/demo-config", methods=["GET"])
+def vapi_demo_config():
+    """
+    Public config for the static demo page. Returns only values safe to expose
+    to a browser (VAPI public key, assistant id, pinned home_id). No secrets.
+    """
+    return jsonify({
+        "publicKey": os.environ.get("VAPI_PUBLIC_KEY", ""),
+        "assistantId": os.environ.get("VAPI_ASSISTANT_ID", ""),
+        "homeId": os.environ.get("VAPI_DEMO_HOME_ID", "scott_home"),
+    })
+
+
 @vapi_bp.route("/auth/request", methods=["POST"])
 def vapi_request():
     """Issue a challenge phrase for a scene request."""

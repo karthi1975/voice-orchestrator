@@ -181,6 +181,14 @@ def serve_static(filename):
     return send_from_directory(static_dir, filename)
 
 
+@app.route('/demo/scott')
+def demo_scott():
+    """VAPI web demo page pinned to scott_home."""
+    import os
+    static_dir = os.path.join(os.path.dirname(__file__), 'static')
+    return send_from_directory(static_dir, 'scott_demo.html')
+
+
 if __name__ == '__main__':
     logger.info(f"Starting Alexa Voice Authentication Server on port {PORT}")
     logger.info("Testing Home Assistant connection...")
