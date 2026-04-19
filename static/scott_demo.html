@@ -7,54 +7,64 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: radial-gradient(1200px 600px at 50% -10%, #1a2744 0%, #0b1220 45%, #060a14 100%);
-    color: #e6ecff; display: flex; flex-direction: column; align-items: center; padding: 40px 20px;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1400px 700px at 50% -10%, #142746 0%, #0a1220 45%, #05080f 100%);
+    color: #e6ecff;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 80px 24px 24px;
   }
-  header { text-align: center; margin-bottom: 32px; }
-  h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: 0.2px; }
-  .sub { color: #8ea0c6; font-size: 14px; }
+  header { text-align: center; max-width: 680px; }
+  h1 {
+    margin: 0 0 12px;
+    font-size: 40px; letter-spacing: 0.2px; font-weight: 700;
+    background: linear-gradient(180deg, #ffffff 0%, #a9c3ff 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .sub { color: #8ea0c6; font-size: 15px; margin-bottom: 32px; }
+
   .card {
-    width: 100%; max-width: 560px; background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 24px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    margin-top: 28px; width: 100%; max-width: 560px;
+    background: rgba(255,255,255,0.035);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px; padding: 28px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
   }
-  .talk {
-    display: block; width: 100%; padding: 18px; margin-top: 8px;
-    background: linear-gradient(180deg, #2f7dff 0%, #1e5cd1 100%);
-    border: 0; border-radius: 12px; color: white; font-size: 18px; font-weight: 600;
-    cursor: pointer; transition: transform .08s ease, filter .15s ease;
+  .card h2 {
+    margin: 0 0 14px; font-size: 16px; font-weight: 600;
+    color: #b8c5e0; letter-spacing: 0.3px; text-transform: uppercase;
   }
-  .talk:hover:not(:disabled) { filter: brightness(1.08); }
-  .talk:active:not(:disabled) { transform: translateY(1px); }
-  .talk:disabled { opacity: .45; cursor: not-allowed; }
-  .talk.live { background: linear-gradient(180deg, #ff5252 0%, #c62828 100%); }
-  .status { margin-top: 16px; font-size: 14px; color: #8ea0c6; min-height: 18px; text-align: center; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #4caf50; margin-right: 6px; vertical-align: middle; }
-  .dot.idle { background: #556; }
-  .dot.connecting { background: #ffa726; animation: pulse 1s infinite; }
-  .dot.live { background: #ff5252; animation: pulse 1s infinite; }
-  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.35; } 100% { opacity: 1; } }
-  .transcript {
-    margin-top: 20px; background: rgba(0,0,0,0.3); border-radius: 10px; padding: 12px 14px;
-    max-height: 280px; overflow-y: auto; font-size: 13px; line-height: 1.55;
-    border: 1px solid rgba(255,255,255,0.06);
+  .steps { margin: 0; padding-left: 22px; line-height: 1.9; color: #cfd8ee; font-size: 15px; }
+  .steps code {
+    background: rgba(93,254,202,0.12); color: #5dfeca; border: 1px solid rgba(93,254,202,0.25);
+    padding: 2px 8px; border-radius: 6px; font-size: 13.5px;
   }
-  .transcript:empty::before { content: "Transcript will appear here."; color: #556; }
-  .line { margin: 2px 0; }
-  .line.user { color: #9cc3ff; }
-  .line.assistant { color: #c9f2c9; }
-  .line.system { color: #7a8499; font-style: italic; }
-  .line.error { color: #ff9a9a; }
-  .examples { margin-top: 14px; font-size: 13px; color: #7a8499; }
-  .examples code { background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; color: #c9d6ef; }
-  footer { margin-top: 24px; color: #4a5578; font-size: 12px; text-align: center; }
+  .cta {
+    margin-top: 18px; padding: 14px 16px;
+    background: linear-gradient(180deg, rgba(93,254,202,0.10) 0%, rgba(93,254,202,0.04) 100%);
+    border: 1px solid rgba(93,254,202,0.25); border-radius: 12px;
+    color: #c9ffe8; font-size: 14.5px; text-align: center;
+  }
+  .cta strong { color: #5dfeca; }
+  .arrow { display: inline-block; animation: jiggle 1.6s ease-in-out infinite; }
+  @keyframes jiggle {
+    0%, 100% { transform: translateX(0); }
+    50%      { transform: translateX(6px); }
+  }
+
   .err {
-    margin-top: 14px; padding: 10px 14px; background: #3a1414; color: #ffb3b3;
+    margin-top: 16px; padding: 10px 14px; background: #3a1414; color: #ffb3b3;
     border: 1px solid #552020; border-radius: 8px; font-size: 13px; display: none;
   }
   .err.show { display: block; }
+
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 12px; text-align: center;
+    color: #4a5578; font-size: 12px; pointer-events: none;
+  }
+  footer strong { color: #8ea0c6; }
 </style>
 </head>
 <body>
@@ -64,112 +74,100 @@
   </header>
 
   <div class="card">
-    <button id="talkBtn" class="talk" disabled>Connecting…</button>
-
-    <div class="status"><span id="dot" class="dot idle"></span><span id="statusText">Initializing…</span></div>
-
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li>Tap the green phone in the bottom-right corner.</li>
+      <li>Say a scene — <code>decorations on</code>, <code>decorations off</code>, or <code>good morning</code>.</li>
+      <li>Repeat the security phrase VoiceGuard speaks back.</li>
+      <li>Scott's Home Assistant fires the scene within ~300 ms.</li>
+    </ol>
+    <div class="cta">Ready? <strong>Tap the phone</strong> <span class="arrow">→</span></div>
     <div id="errBox" class="err"></div>
-
-    <div class="transcript" id="transcript"></div>
-
-    <div class="examples">
-      Try: <code>decorations on</code> &middot; <code>decorations off</code> &middot; <code>good morning</code>
-      <br />Then repeat the security phrase when prompted.
-    </div>
   </div>
 
-  <footer>home_id locked to <strong>scott_home</strong> &middot; orchestrator: voiceorchestrator.homeadapt.us</footer>
+  <footer>
+    home_id locked to <strong>scott_home</strong> &middot;
+    orchestrator <strong>voiceorchestrator.homeadapt.us</strong>
+  </footer>
 
-<script type="module">
-  import Vapi from "https://cdn.jsdelivr.net/npm/@vapi-ai/web/+esm";
-
-  const talkBtn = document.getElementById("talkBtn");
-  const dot = document.getElementById("dot");
-  const statusText = document.getElementById("statusText");
-  const transcript = document.getElementById("transcript");
+<script>
+(async function () {
   const errBox = document.getElementById("errBox");
+  const showError = (m) => { errBox.textContent = m; errBox.classList.add("show"); };
 
-  const setStatus = (cls, text) => { dot.className = "dot " + cls; statusText.textContent = text; };
-  const log = (who, text) => {
-    const d = document.createElement("div");
-    d.className = "line " + who;
-    d.textContent = (who === "user" ? "You: " : who === "assistant" ? "VoiceGuard: " : "") + text;
-    transcript.appendChild(d);
-    transcript.scrollTop = transcript.scrollHeight;
-  };
-  const showError = (msg) => { errBox.textContent = msg; errBox.classList.add("show"); };
-
-  let vapi = null;
-  let config = null;
-  let live = false;
-
-  async function init() {
-    try {
-      const r = await fetch("/vapi/demo-config", { cache: "no-store" });
-      if (!r.ok) throw new Error("Config endpoint " + r.status);
-      config = await r.json();
-      if (!config.publicKey) throw new Error("VAPI_PUBLIC_KEY not configured on server.");
-      if (!config.assistantId) throw new Error("VAPI_ASSISTANT_ID not configured on server.");
-
-      vapi = new Vapi(config.publicKey);
-
-      vapi.on("call-start", () => {
-        live = true;
-        talkBtn.textContent = "End Call";
-        talkBtn.classList.add("live");
-        setStatus("live", "Listening…");
-      });
-      vapi.on("call-end", () => {
-        live = false;
-        talkBtn.textContent = "Talk";
-        talkBtn.classList.remove("live");
-        setStatus("idle", "Idle. Click Talk to start.");
-      });
-      vapi.on("speech-start", () => setStatus("live", "VoiceGuard speaking…"));
-      vapi.on("speech-end",   () => setStatus("live", "Listening…"));
-      vapi.on("message", (m) => {
-        if (m.type === "transcript" && m.transcriptType === "final") {
-          log(m.role === "user" ? "user" : "assistant", m.transcript);
-        } else if (m.type === "tool-calls") {
-          const names = (m.toolCallList || []).map(t => t.function?.name).join(", ");
-          if (names) log("system", "→ tool: " + names);
-        } else if (m.type === "status-update") {
-          // quiet
-        }
-      });
-      vapi.on("error", (e) => {
-        console.error(e);
-        showError("VAPI error: " + (e?.message || JSON.stringify(e)));
-        setStatus("idle", "Error.");
-      });
-
-      talkBtn.disabled = false;
-      talkBtn.textContent = "Talk";
-      setStatus("idle", "Idle. Click Talk to start.");
-    } catch (e) {
-      console.error(e);
-      showError("Init failed: " + e.message);
-      setStatus("idle", "Init failed.");
-    }
+  let config;
+  try {
+    const r = await fetch("/vapi/demo-config", { cache: "no-store" });
+    if (!r.ok) throw new Error("config " + r.status);
+    config = await r.json();
+    if (!config.publicKey)   throw new Error("VAPI_PUBLIC_KEY not set on server.");
+    if (!config.assistantId) throw new Error("VAPI_ASSISTANT_ID not set on server.");
+  } catch (e) {
+    showError("Setup error: " + e.message);
+    return;
   }
 
-  talkBtn.addEventListener("click", async () => {
-    if (!vapi) return;
-    if (live) { vapi.stop(); return; }
-    errBox.classList.remove("show");
-    setStatus("connecting", "Connecting…");
-    try {
-      await vapi.start(config.assistantId, {
-        variableValues: { home_id: config.homeId || "scott_home" }
-      });
-    } catch (e) {
-      console.error(e);
-      showError("Start failed: " + (e?.message || e));
-      setStatus("idle", "Idle. Click Talk to start.");
-    }
-  });
+  // VAPI floating-phone widget config.
+  // Docs: https://github.com/VapiAI/html-script-tag
+  const buttonConfig = {
+    position: "bottom-right",
+    offset: "32px",
+    width:  "64px",
+    height: "64px",
+    idle: {
+      color: "rgb(93, 254, 202)",
+      type: "round",
+      icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone.svg",
+    },
+    loading: {
+      color: "rgb(93, 124, 202)",
+      type: "round",
+      icon: "https://unpkg.com/lucide-static@0.321.0/icons/loader-2.svg",
+    },
+    active: {
+      color: "rgb(255, 82, 82)",
+      type: "round",
+      icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone-off.svg",
+    },
+  };
 
-  init();
+  const script = document.createElement("script");
+  script.src = "https://cdn.jsdelivr.net/gh/VapiAI/html-script-tag@latest/dist/assets/index.js";
+  script.defer = true;
+  script.async = true;
+  script.onload = function () {
+    try {
+      window.vapiInstance = window.vapiSDK.run({
+        apiKey: config.publicKey,
+        assistant: config.assistantId,
+        assistantOverrides: {
+          variableValues: { home_id: config.homeId || "scott_home" },
+        },
+        config: buttonConfig,
+      });
+
+      // Minimal logging for on-page debugging via DevTools.
+      if (window.vapiInstance?.on) {
+        window.vapiInstance.on("call-start", () => console.log("[vapi] call-start"));
+        window.vapiInstance.on("call-end",   () => console.log("[vapi] call-end"));
+        window.vapiInstance.on("error", (e)  => {
+          console.error("[vapi] error", e);
+          showError("Call error: " + (e?.message || JSON.stringify(e)));
+        });
+        window.vapiInstance.on("message", (m) => {
+          if (m?.type === "tool-calls") {
+            const names = (m.toolCallList || []).map(t => t.function?.name).join(", ");
+            if (names) console.log("[vapi] tool-call:", names);
+          }
+        });
+      }
+    } catch (e) {
+      showError("Widget init failed: " + (e?.message || e));
+    }
+  };
+  script.onerror = () => showError("Failed to load VAPI widget script.");
+  document.head.appendChild(script);
+})();
 </script>
 </body>
 </html>
