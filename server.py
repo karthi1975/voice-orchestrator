@@ -17,6 +17,9 @@ from routes.vapi import vapi_bp
 # Import new SOLID architecture dependency container
 from app import DependencyContainer
 from app.middleware.auth_middleware import setup_auth_middleware
+from app.controllers.voice_auth_controller import VoiceAuthController
+from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
+from app.services.voice_auth_service import VoiceAuthService
 
 app = Flask(__name__)
 
@@ -51,6 +54,66 @@ setup_auth_middleware(app)
 
 # Store container for potential access
 app.container = container
+
+
+# ---------------------------------------------------------------------------
+# Voice Authentication (enrollment + challenge log + phone mapping)
+# Wired independently of USE_DATABASE so we can ship even when legacy services
+# run in in-memory mode. Falls back to in-memory repos when DATABASE_URL is unset.
+# ---------------------------------------------------------------------------
+
+_va_logger = logging.getLogger("voice_auth.wiring")
+
+
+def _build_voice_auth_service() -> VoiceAuthService:
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import scoped_session, sessionmaker
+            from app.repositories.implementations.sqlalchemy_models import Base
+            from app.repositories.implementations.sqlalchemy_voice_auth_repo import (
+                SQLAlchemyChallengeLogRepository,
+                SQLAlchemyEnrollmentRepository,
+                SQLAlchemyPhoneMappingRepository,
+            )
+
+            engine = create_engine(db_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
+            Base.metadata.create_all(engine)  # no-op if Alembic already ran
+            session_factory = scoped_session(sessionmaker(bind=engine, expire_on_commit=False))
+            session = session_factory()
+            _va_logger.info("VoiceAuthService: using SQLAlchemy repositories")
+            return VoiceAuthService(
+                enrollment_repo=SQLAlchemyEnrollmentRepository(session),
+                log_repo=SQLAlchemyChallengeLogRepository(session),
+                phone_repo=SQLAlchemyPhoneMappingRepository(session),
+            )
+        except Exception as e:
+            _va_logger.error(f"VoiceAuthService: DB wiring failed ({e}); falling back to in-memory", exc_info=True)
+
+    from app.repositories.implementations.in_memory_voice_auth_repo import (
+        InMemoryChallengeLogRepository,
+        InMemoryEnrollmentRepository,
+        InMemoryPhoneMappingRepository,
+    )
+    _va_logger.warning("VoiceAuthService: using IN-MEMORY repositories (data will NOT persist across restarts)")
+    return VoiceAuthService(
+        enrollment_repo=InMemoryEnrollmentRepository(),
+        log_repo=InMemoryChallengeLogRepository(),
+        phone_repo=InMemoryPhoneMappingRepository(),
+    )
+
+
+voice_auth_service = _build_voice_auth_service()
+voice_auth_dispatcher = HADirectDispatcher.from_env()
+voice_auth_controller = VoiceAuthController(
+    service=voice_auth_service,
+    dispatcher=voice_auth_dispatcher,
+)
+app.register_blueprint(voice_auth_controller.blueprint)
+
+# Expose on the app object so routes/vapi.py can pick it up via current_app
+app.voice_auth_service = voice_auth_service
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

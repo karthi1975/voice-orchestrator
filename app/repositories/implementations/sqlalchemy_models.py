@@ -6,7 +6,7 @@ Maps domain models to database tables.
 
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Integer, DateTime, Enum as SQLEnum, Index, Boolean, ForeignKey
+from sqlalchemy import String, Integer, Float, Text, DateTime, Enum as SQLEnum, Index, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.domain.enums import ClientType, ChallengeStatus
@@ -218,3 +218,94 @@ class ChallengeModel(Base):
     def __repr__(self) -> str:
         """String representation."""
         return f"<ChallengeModel(id={self.id}, identifier={self.identifier}, client_type={self.client_type})>"
+
+
+# --------------------------------------------------------------------------- #
+# Voice authentication (migration 006)
+# --------------------------------------------------------------------------- #
+
+
+class VoiceAuthEnrollmentModel(Base):
+    """Per-user opt-in: 'require voice auth before firing this automation.'"""
+    __tablename__ = 'voice_auth_enrollments'
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_ref: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    home_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey('homes.home_id'), nullable=False, index=True
+    )
+    automation_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    automation_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    ha_service: Mapped[str] = mapped_column(String(64), nullable=False)
+    ha_entity: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default='ACTIVE', server_default='ACTIVE')
+    challenge_type: Mapped[str] = mapped_column(String(32), nullable=False, default='VERIFICATION', server_default='VERIFICATION')
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default='3')
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default='30')
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('user_ref', 'automation_id', name='uq_enrollment_user_automation'),
+        Index('idx_enrollment_user_ref', 'user_ref'),
+        Index('idx_enrollment_home_id', 'home_id'),
+        Index('idx_enrollment_status', 'status'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<VoiceAuthEnrollmentModel(id={self.id}, user={self.user_ref}, automation={self.automation_id})>"
+
+
+class VoiceAuthChallengeLogModel(Base):
+    """One row per challenge attempt — audit + state tracking."""
+    __tablename__ = 'voice_auth_challenge_logs'
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    enrollment_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey('voice_auth_enrollments.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    user_ref: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    home_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    automation_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    vapi_call_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    initiated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    result: Mapped[str] = mapped_column(String(32), nullable=False, default='PENDING', server_default='PENDING')
+    failure_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    confidence_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    request_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    response_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index('idx_challenge_log_user_time', 'user_ref', 'started_at'),
+        Index('idx_challenge_log_result_time', 'result', 'started_at'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<VoiceAuthChallengeLogModel(id={self.id}, user={self.user_ref}, result={self.result})>"
+
+
+class VoiceAuthPhoneMappingModel(Base):
+    """Caller phone number -> user_ref/home, for inbound VAPI phone routing."""
+    __tablename__ = 'voice_auth_phone_mappings'
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    phone_e164: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
+    user_ref: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    home_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey('homes.home_id'), nullable=False, index=True
+    )
+    vapi_phone_number_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    label: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default='true')
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<VoiceAuthPhoneMappingModel(id={self.id}, phone={self.phone_e164}, user={self.user_ref})>"

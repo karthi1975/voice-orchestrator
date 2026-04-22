@@ -105,6 +105,23 @@ class HADirectDispatcher:
             return override
         return self._scenes.get(key)
 
+    def dispatch_direct(
+        self,
+        home_id: str,
+        service: str,
+        entity: str,
+    ) -> DispatchResult:
+        """Fire a known (service, entity) pair for a home. Used by the voice-auth
+        enrollment flow where the target is already resolved from the DB, so we
+        bypass the scene-catalog lookup."""
+        home = self._homes.get(home_id)
+        if not home:
+            msg = f"Unknown home_id: {home_id}"
+            logger.warning(f"DISPATCH reject {msg}")
+            return DispatchResult(False, msg)
+        target = SceneTarget(service=service, entity=entity)
+        return self._do_post(home, target, source_label=f"{service}.{entity}")
+
     def dispatch(self, home_id: str, scene_name: str) -> DispatchResult:
         home = self._homes.get(home_id)
         if not home:
@@ -118,6 +135,9 @@ class HADirectDispatcher:
             logger.warning(f"DISPATCH reject {msg}")
             return DispatchResult(False, msg)
 
+        return self._do_post(home, target, source_label=scene_name)
+
+    def _do_post(self, home: "HomeConfig", target: "SceneTarget", source_label: str) -> DispatchResult:
         url = f"{home.ha_url.rstrip('/')}/api/services/{target.service}/turn_on"
         headers = {
             "Authorization": f"Bearer {home.ha_token}",
@@ -129,18 +149,18 @@ class HADirectDispatcher:
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=self._timeout)
         except requests.exceptions.Timeout:
-            logger.error(f"DISPATCH timeout home={home_id} scene={scene_name} url={url}")
+            logger.error(f"DISPATCH timeout home={home.home_id} target={source_label} url={url}")
             return DispatchResult(False, "Home Assistant timed out.")
         except requests.exceptions.ConnectionError:
-            logger.error(f"DISPATCH unreachable home={home_id} scene={scene_name} url={url}")
+            logger.error(f"DISPATCH unreachable home={home.home_id} target={source_label} url={url}")
             return DispatchResult(False, "Home Assistant unreachable.")
         except Exception as e:
-            logger.error(f"DISPATCH error home={home_id} scene={scene_name}: {e}", exc_info=True)
+            logger.error(f"DISPATCH error home={home.home_id} target={source_label}: {e}", exc_info=True)
             return DispatchResult(False, f"Dispatch error: {e}")
 
         latency_ms = int((time.monotonic() - t0) * 1000)
         logger.info(
-            f"DISPATCH home={home_id} scene=\"{scene_name}\" entity={target.entity_id} "
+            f"DISPATCH home={home.home_id} target=\"{source_label}\" entity={target.entity_id} "
             f"status={resp.status_code} took={latency_ms}ms"
         )
 

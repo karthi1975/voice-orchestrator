@@ -83,8 +83,9 @@ FUTUREPROOFHOME_ENABLED=true
 DEFAULT_HOME_ID=home_1
 LOG_FPH_REQUESTS=false
 
-# Database (in-memory mode)
+# Database — legacy services still in in-memory mode; voice_auth reads DATABASE_URL directly.
 USE_DATABASE=false
+DATABASE_URL=postgresql+psycopg2://voiceorch:voiceorch_password_2026@voice-orchestrator-db:5432/voice_orchestrator
 
 # Logging
 LOG_LEVEL=INFO
@@ -136,6 +137,7 @@ echo "→ Starting Voice Orchestrator..."
 docker run -d \
     --name voice-orchestrator \
     --restart unless-stopped \
+    --network voice-orchestrator_default \
     -p 6500:6500 \
     --env-file .env \
     --health-cmd="curl -f http://localhost:6500/health || exit 1" \
