@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Voice Auth</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #1a2744 0%, #0b1220 45%, #05080f 100%);
+    color: #e6ecff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px; padding-top: calc(24px + env(safe-area-inset-top));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    user-select: none;
+  }
+  header { text-align: center; margin-bottom: 28px; }
+  h1 { margin: 0 0 8px; font-size: 22px; letter-spacing: .2px; font-weight: 600;
+       background: linear-gradient(180deg, #ffffff, #a9c3ff);
+       -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .sub { color: #8ea0c6; font-size: 14px; min-height: 18px; }
+
+  .dot {
+    width: 132px; height: 132px; border-radius: 50%;
+    background: linear-gradient(180deg, #2f7dff, #1e5cd1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 48px; margin: 8px 0 28px; color: white;
+    box-shadow: 0 12px 40px rgba(47,125,255,.35);
+    transition: transform .25s ease, background .25s ease, box-shadow .25s ease;
+  }
+  .dot.listening { background: linear-gradient(180deg, #5dfeca, #14c59a);
+                   box-shadow: 0 12px 40px rgba(93,254,202,.4); animation: pulse 1.2s ease-in-out infinite; }
+  .dot.speaking  { background: linear-gradient(180deg, #ffb84d, #d57a00);
+                   box-shadow: 0 12px 40px rgba(255,184,77,.4); }
+  .dot.success   { background: linear-gradient(180deg, #61d095, #2f9d5a);
+                   box-shadow: 0 12px 40px rgba(97,208,149,.4); }
+  .dot.error     { background: linear-gradient(180deg, #ff6b6b, #c62828);
+                   box-shadow: 0 12px 40px rgba(255,107,107,.4); }
+  @keyframes pulse {
+    0%,100% { transform: scale(1); }
+    50%     { transform: scale(1.06); }
+  }
+
+  .status { font-size: 17px; min-height: 24px; text-align: center; color: #cfd8ee; }
+  .detail { color: #8ea0c6; font-size: 13px; margin-top: 6px; min-height: 18px; text-align: center; }
+  .err {
+    margin-top: 20px; padding: 10px 14px; background: #3a1414; color: #ffb3b3;
+    border: 1px solid #552020; border-radius: 8px; font-size: 13px; max-width: 360px; text-align: center;
+    display: none;
+  }
+  .err.show { display: block; }
+  footer { position: fixed; bottom: 12px; color: #4a5578; font-size: 11px;
+           padding-bottom: env(safe-area-inset-bottom); }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Voice Authentication</h1>
+    <div class="sub" id="sub">Preparing…</div>
+  </header>
+
+  <div class="dot" id="dot">🎙</div>
+  <div class="status" id="status">Connecting…</div>
+  <div class="detail" id="detail"></div>
+  <div class="err" id="err"></div>
+
+  <footer id="footer">voiceorchestrator.homeadapt.us</footer>
+
+<script type="module">
+  import Vapi from "https://cdn.jsdelivr.net/npm/@vapi-ai/web/+esm";
+
+  // ------ read query params ------
+  const params = new URLSearchParams(location.search);
+  const homeId         = params.get("home_id") || "";
+  const userRef        = params.get("user_ref") || "";
+  const automationId   = params.get("automation_id") || "";
+  const automationName = params.get("automation_name") || "";
+  const initiatedBy    = params.get("initiated_by") || "WEB";
+
+  // ------ elements ------
+  const dot    = document.getElementById("dot");
+  const status = document.getElementById("status");
+  const detail = document.getElementById("detail");
+  const sub    = document.getElementById("sub");
+  const err    = document.getElementById("err");
+
+  sub.textContent = automationName || "Home automation";
+
+  const setState = (cls, text, detailText) => {
+    dot.className = "dot " + (cls || "");
+    if (text       !== undefined) status.textContent = text;
+    if (detailText !== undefined) detail.textContent = detailText;
+  };
+  const showErr = (msg) => { err.textContent = msg; err.classList.add("show"); };
+
+  // ------ post results back to host app ------
+  // MAUI / native WebViews can intercept EITHER the app://voice-auth/result URL
+  // OR the WKWebView message handler "voiceAuth" OR React-Native-WebView postMessage.
+  function postBack(payload) {
+    // 1. URL-scheme hop — works with MAUI WebView.Navigating handler
+    try {
+      const qs = Object.entries(payload)
+        .map(([k,v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v ?? ""))
+        .join("&");
+      // Don't navigate away until the user sees the final state for a moment
+      setTimeout(() => { location.href = "app://voice-auth/result?" + qs; }, 1200);
+    } catch (_) {}
+
+    // 2. iOS WKWebView native handler (if host registered "voiceAuth")
+    try { window.webkit?.messageHandlers?.voiceAuth?.postMessage(payload); } catch (_) {}
+
+    // 3. Android WebView JS bridge (if host exposed VoiceAuthBridge)
+    try { window.VoiceAuthBridge?.onResult(JSON.stringify(payload)); } catch (_) {}
+
+    // 4. React Native WebView
+    try { window.ReactNativeWebView?.postMessage(JSON.stringify(payload)); } catch (_) {}
+  }
+
+  // ------ main ------
+  async function init() {
+    if (!homeId || !userRef || !automationId) {
+      showErr("Missing required params (home_id, user_ref, automation_id).");
+      postBack({ status: "ERROR", reason: "missing_params", automation_id: automationId });
+      setState("error", "Misconfigured");
+      return;
+    }
+
+    let cfg;
+    try {
+      const r = await fetch("/vapi/demo-config", { cache: "no-store" });
+      if (!r.ok) throw new Error("config " + r.status);
+      cfg = await r.json();
+      if (!cfg.publicKey || !cfg.assistantId) throw new Error("server missing VAPI keys");
+    } catch (e) {
+      showErr("Server setup error: " + e.message);
+      postBack({ status: "ERROR", reason: "config_unavailable", automation_id: automationId });
+      setState("error", "Server error");
+      return;
+    }
+
+    const vapi = new Vapi(cfg.publicKey);
+
+    // Remember the last tool-call response status so we can tell success/deny on call-end
+    let lastToolStatus  = null;
+    let lastToolSpeech  = null;
+    let lastToolReason  = null;
+
+    vapi.on("call-start",  () => setState("listening", "Listening…", ""));
+    vapi.on("speech-start", () => setState("speaking",  "Speaking",  ""));
+    vapi.on("speech-end",   () => setState("listening", "Listening…", ""));
+
+    vapi.on("message", (m) => {
+      // VAPI emits tool-call results; capture the status field.
+      const type = m?.type || "";
+      if (type === "tool-calls-result" || type === "tool-call-result" || type === "function-call-result") {
+        // Different SDK shapes across VAPI versions — try several
+        const candidates = [
+          m?.toolCallResult?.result,
+          m?.result,
+          m?.functionCall?.result,
+          m?.toolResults?.[0]?.result,
+        ];
+        for (const r of candidates) {
+          if (r && typeof r === "object" && r.status) {
+            lastToolStatus = r.status;
+            lastToolSpeech = r.speech;
+            lastToolReason = r.reason || null;
+            break;
+          }
+        }
+      }
+    });
+
+    vapi.on("error", (e) => {
+      console.error("[vapi] error", e);
+      showErr("Call error: " + (e?.message || "unknown"));
+      setState("error", "Error");
+      postBack({ status: "ERROR", reason: e?.message || "error", automation_id: automationId });
+    });
+
+    vapi.on("call-end", () => {
+      let outcome = "COMPLETED";
+      let cls = "";
+      let label = "Ended";
+      let det = "";
+
+      if (lastToolStatus === "approved") {
+        outcome = "SUCCESS"; cls = "success"; label = "Verified"; det = automationName + " activated.";
+      } else if (lastToolStatus === "denied") {
+        outcome = "DENIED"; cls = "error"; label = "Denied";
+        det = lastToolReason ? `Reason: ${lastToolReason}` : (lastToolSpeech || "");
+      }
+
+      setState(cls, label, det);
+      postBack({
+        status: outcome,
+        automation_id: automationId,
+        user_ref: userRef,
+        home_id: homeId,
+        reason: lastToolReason || "",
+      });
+    });
+
+    try {
+      setState("", "Starting…", "");
+      await vapi.start(cfg.assistantId, {
+        variableValues: {
+          home_id:         homeId,
+          user_ref:        userRef,
+          automation_id:   automationId,
+          automation_name: automationName,
+          initiated_by:    initiatedBy,
+        },
+      });
+    } catch (e) {
+      console.error(e);
+      showErr("Start failed: " + (e?.message || e));
+      setState("error", "Start failed");
+      postBack({ status: "ERROR", reason: e?.message || "start_failed", automation_id: automationId });
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>

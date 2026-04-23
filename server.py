@@ -257,6 +257,26 @@ def demo_scott():
     return send_from_directory(static_dir, 'scott_demo.html')
 
 
+@app.route('/voice-auth/session')
+def voice_auth_session():
+    """Parameterized VAPI voice-session page for mobile WebView embedding.
+
+    Read via URL query params:
+      home_id, user_ref, automation_id, automation_name, initiated_by
+
+    Posts result back to the host app via three mechanisms (in order):
+      1. app://voice-auth/result?status=...&automation_id=...
+         → MAUI WebView.Navigating handler intercepts
+      2. window.webkit.messageHandlers.voiceAuth.postMessage({...})
+         → iOS WKWebView script message handler
+      3. window.ReactNativeWebView.postMessage(JSON.stringify({...}))
+         → React Native WebView
+    """
+    import os
+    static_dir = os.path.join(os.path.dirname(__file__), 'static')
+    return send_from_directory(static_dir, 'voice_auth_session.html')
+
+
 if __name__ == '__main__':
     logger.info(f"Starting Alexa Voice Authentication Server on port {PORT}")
     logger.info("Testing Home Assistant connection...")
