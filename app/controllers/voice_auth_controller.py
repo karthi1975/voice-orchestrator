@@ -118,7 +118,8 @@ class VoiceAuthController(BaseController):
 
         bp.add_url_rule("/automations/discover", "discover_automations", self.discover_automations, methods=["GET"])
 
-        bp.add_url_rule("/vapi/call-start", "vapi_call_start", self.vapi_call_start, methods=["POST"])
+        # NOTE: /vapi/call-start lives on the /vapi blueprint (routes/vapi.py)
+        # to reuse X-Vapi-Secret auth; it is NOT part of the mobile-API surface.
 
     # ------- Enrollment CRUD ------------------------------------------------
 
@@ -342,52 +343,3 @@ class VoiceAuthController(BaseController):
         entities.sort(key=lambda x: (x["domain"], x["entity_id"]))
         return jsonify({"home_id": home_id, "count": len(entities), "items": entities}), 200
 
-    # ------- VAPI phone inbound webhook --------------------------------------
-
-    def vapi_call_start(self):
-        """VAPI calls this when a phone call begins. We return assistantOverrides
-        so the assistant knows who is calling without asking.
-
-        VAPI payload shape (abbreviated):
-          { "message": { "type": "assistant-request",
-                         "call": { "id": "...", "customer": { "number": "+15551234567" },
-                                   "phoneNumber": { "id": "..." } } } }
-
-        Response shape VAPI expects:
-          {
-            "assistant": {...}            # optional inline override
-            "assistantId": "..."          # or reuse static assistant
-            "assistantOverrides": {
-              "variableValues": { "home_id": "...", "user_ref": "...",
-                                  "caller_label": "...", "automation_id": null }
-            }
-          }
-        """
-        import os
-        body = request.get_json(silent=True) or {}
-        msg = body.get("message", {}) or {}
-        call = msg.get("call", {}) or {}
-        customer = call.get("customer", {}) or {}
-        phone_num = (customer.get("number") or "").strip()
-
-        overrides: dict = {"variableValues": {}}
-        if phone_num:
-            m = self._svc.lookup_phone(phone_num)
-            if m:
-                overrides["variableValues"] = {
-                    "home_id": m.home_id,
-                    "user_ref": m.user_ref,
-                    "caller_label": m.label or "",
-                }
-                logger.info(
-                    f"VAPI call-start matched phone={phone_num} "
-                    f"-> user_ref={m.user_ref} home_id={m.home_id}"
-                )
-            else:
-                logger.info(f"VAPI call-start unmapped phone={phone_num}")
-
-        assistant_id = os.environ.get("VAPI_ASSISTANT_ID", "")
-        response = {"assistantOverrides": overrides}
-        if assistant_id:
-            response["assistantId"] = assistant_id
-        return jsonify(response), 200

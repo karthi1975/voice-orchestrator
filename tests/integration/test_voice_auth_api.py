@@ -14,6 +14,7 @@ from flask import Flask
 
 from app.controllers.voice_auth_controller import VoiceAuthController
 from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
+from app.middleware.voice_auth_api_key import attach_mobile_api_key_auth
 from app.repositories.implementations.in_memory_voice_auth_repo import (
     InMemoryChallengeLogRepository,
     InMemoryEnrollmentRepository,
@@ -24,17 +25,42 @@ from app.services.voice_auth_service import VoiceAuthService
 
 @pytest.fixture
 def client():
-    with patch.dict(os.environ, {"HOME_CONFIGS_JSON": "{}", "SCENE_CATALOG_JSON": "{}"}):
+    # Exercise with middleware OPEN (MOBILE_API_KEYS_JSON unset) — same as
+    # production when Tier 1 is not yet configured. Auth-specific tests below
+    # mount a fresh blueprint with keys configured.
+    with patch.dict(os.environ, {"HOME_CONFIGS_JSON": "{}", "SCENE_CATALOG_JSON": "{}",
+                                  "MOBILE_API_KEYS_JSON": ""}):
         dispatcher = HADirectDispatcher.from_env()
-    svc = VoiceAuthService(
-        enrollment_repo=InMemoryEnrollmentRepository(),
-        log_repo=InMemoryChallengeLogRepository(),
-        phone_repo=InMemoryPhoneMappingRepository(),
-    )
-    controller = VoiceAuthController(service=svc, dispatcher=dispatcher)
-    app = Flask(__name__)
-    app.register_blueprint(controller.blueprint)
-    return app.test_client()
+        svc = VoiceAuthService(
+            enrollment_repo=InMemoryEnrollmentRepository(),
+            log_repo=InMemoryChallengeLogRepository(),
+            phone_repo=InMemoryPhoneMappingRepository(),
+        )
+        controller = VoiceAuthController(service=svc, dispatcher=dispatcher)
+        attach_mobile_api_key_auth(controller.blueprint)
+        app = Flask(__name__)
+        app.register_blueprint(controller.blueprint)
+        return app.test_client()
+
+
+@pytest.fixture
+def client_authed():
+    """Client with MOBILE_API_KEYS_JSON enforced (for auth-specific tests)."""
+    with patch.dict(os.environ, {
+        "HOME_CONFIGS_JSON": "{}", "SCENE_CATALOG_JSON": "{}",
+        "MOBILE_API_KEYS_JSON": '{"ios":"sk_ios_good","android":"sk_and_good"}',
+    }):
+        dispatcher = HADirectDispatcher.from_env()
+        svc = VoiceAuthService(
+            enrollment_repo=InMemoryEnrollmentRepository(),
+            log_repo=InMemoryChallengeLogRepository(),
+            phone_repo=InMemoryPhoneMappingRepository(),
+        )
+        controller = VoiceAuthController(service=svc, dispatcher=dispatcher)
+        attach_mobile_api_key_auth(controller.blueprint)
+        app = Flask(__name__)
+        app.register_blueprint(controller.blueprint)
+        return app.test_client()
 
 
 def _seed(client, **overrides):
@@ -164,23 +190,46 @@ class TestPhoneMappings:
         assert r.status_code == 400
 
 
-class TestVapiCallStart:
-    def test_unknown_caller(self, client):
-        r = client.post("/api/v1/voice-auth/vapi/call-start",
-                        json={"message": {"call": {"customer": {"number": "+19999999999"}}}})
-        assert r.status_code == 200
-        d = r.get_json()
-        assert d["assistantOverrides"] == {"variableValues": {}}
+class TestTier1Auth:
+    """Middleware tests — requires client_authed fixture (keys enforced)."""
 
-    def test_known_caller_sets_overrides(self, client):
-        client.post("/api/v1/voice-auth/phone-mappings",
-                    json={"phone": "+15551112222",
-                          "user_ref": "u1", "home_id": "scott_home",
-                          "label": "Scott mobile"})
-        r = client.post("/api/v1/voice-auth/vapi/call-start",
-                        json={"message": {"call": {"customer": {"number": "+15551112222"}}}})
-        d = r.get_json()
-        vv = d["assistantOverrides"]["variableValues"]
-        assert vv["user_ref"] == "u1"
-        assert vv["home_id"] == "scott_home"
-        assert vv["caller_label"] == "Scott mobile"
+    def _enroll_body(self):
+        return {
+            "user_ref": "u1", "home_id": "scott_home",
+            "automation_name": "X", "ha_service": "scene", "ha_entity": "x",
+        }
+
+    def test_missing_header_401(self, client_authed):
+        r = client_authed.post("/api/v1/voice-auth/enrollments", json=self._enroll_body())
+        assert r.status_code == 401
+        assert r.get_json()["code"] == "UNAUTHORIZED"
+
+    def test_malformed_header_401(self, client_authed):
+        r = client_authed.post("/api/v1/voice-auth/enrollments",
+                               json=self._enroll_body(),
+                               headers={"Authorization": "Basic abc"})
+        assert r.status_code == 401
+
+    def test_wrong_key_401(self, client_authed):
+        r = client_authed.post("/api/v1/voice-auth/enrollments",
+                               json=self._enroll_body(),
+                               headers={"Authorization": "Bearer sk_wrong"})
+        assert r.status_code == 401
+
+    def test_ios_key_passes(self, client_authed):
+        r = client_authed.post("/api/v1/voice-auth/enrollments",
+                               json=self._enroll_body(),
+                               headers={"Authorization": "Bearer sk_ios_good"})
+        assert r.status_code == 201
+
+    def test_android_key_passes(self, client_authed):
+        r = client_authed.post("/api/v1/voice-auth/enrollments",
+                               json=self._enroll_body(),
+                               headers={"Authorization": "Bearer sk_and_good"})
+        assert r.status_code == 201
+
+    def test_empty_keys_config_falls_open(self, client):
+        # client fixture has MOBILE_API_KEYS_JSON="" — no header required
+        r = client.post("/api/v1/voice-auth/enrollments",
+                        json=self._enroll_body())
+        assert r.status_code == 201

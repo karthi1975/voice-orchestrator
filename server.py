@@ -19,6 +19,7 @@ from app import DependencyContainer
 from app.middleware.auth_middleware import setup_auth_middleware
 from app.controllers.voice_auth_controller import VoiceAuthController
 from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
+from app.middleware.voice_auth_api_key import attach_mobile_api_key_auth
 from app.services.voice_auth_service import VoiceAuthService
 
 app = Flask(__name__)
@@ -110,6 +111,10 @@ voice_auth_controller = VoiceAuthController(
     service=voice_auth_service,
     dispatcher=voice_auth_dispatcher,
 )
+
+# Tier 1 auth: bearer API key check on every /api/v1/voice-auth/* request.
+# Falls open (dev-friendly) when MOBILE_API_KEYS_JSON is unset.
+attach_mobile_api_key_auth(voice_auth_controller.blueprint)
 app.register_blueprint(voice_auth_controller.blueprint)
 
 # Expose on the app object so routes/vapi.py can pick it up via current_app

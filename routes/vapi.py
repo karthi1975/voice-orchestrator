@@ -121,6 +121,55 @@ def vapi_demo_config():
     })
 
 
+@vapi_bp.route("/call-start", methods=["POST"])
+def vapi_call_start():
+    """VAPI inbound phone webhook.
+
+    Fires when a phone call begins on a VAPI number attached to this assistant.
+    We look up the caller's number in voice_auth_phone_mappings and return
+    assistantOverrides.variableValues so the assistant knows the (user_ref,
+    home_id) without asking.
+
+    Auth: reuses the X-Vapi-Secret header enforced on /vapi/*. Mobile clients
+    never call this; it's VAPI-cloud-only.
+    """
+    if not _authorized(request):
+        return jsonify({"error": "unauthorized"}), 401
+
+    svc = _get_voice_auth_service()
+    if svc is None:
+        logger.error("call-start hit but VoiceAuthService not wired")
+        return jsonify({"assistantOverrides": {"variableValues": {}}}), 200
+
+    body = request.get_json(silent=True) or {}
+    msg = body.get("message", {}) or {}
+    call = msg.get("call", {}) or {}
+    customer = call.get("customer", {}) or {}
+    phone_num = (customer.get("number") or "").strip()
+
+    overrides: dict = {"variableValues": {}}
+    if phone_num:
+        m = svc.lookup_phone(phone_num)
+        if m:
+            overrides["variableValues"] = {
+                "home_id": m.home_id,
+                "user_ref": m.user_ref,
+                "caller_label": m.label or "",
+            }
+            logger.info(
+                f"VAPI call-start matched phone={phone_num} "
+                f"-> user_ref={m.user_ref} home_id={m.home_id}"
+            )
+        else:
+            logger.info(f"VAPI call-start unmapped phone={phone_num}")
+
+    assistant_id = os.environ.get("VAPI_ASSISTANT_ID", "")
+    resp = {"assistantOverrides": overrides}
+    if assistant_id:
+        resp["assistantId"] = assistant_id
+    return jsonify(resp), 200
+
+
 @vapi_bp.route("/auth/request", methods=["POST"])
 def vapi_request():
     """Issue a challenge phrase.
