@@ -87,9 +87,18 @@ def _unwrap(req):
 
 
 def _first(*vals):
+    """Return the first non-empty, non-template value.
+
+    Strips values that look like unresolved VAPI templates (e.g. '{{user_ref}}')
+    so we don't ever dispatch on literal placeholder text.
+    """
     for v in vals:
-        if v is not None and v != "":
-            return v
+        if v is None or v == "":
+            continue
+        s = str(v).strip()
+        if s.startswith("{{") and s.endswith("}}"):
+            continue
+        return v
     return None
 
 
@@ -128,7 +137,9 @@ def vapi_request():
 
         # Collect identifiers from either tool args or variableValues
         home_id = _first(args.get("home_id"), vv.get("home_id"))
-        scene_name = (args.get("scene_name") or "").strip().lower()
+        scene_name_raw = (args.get("scene_name") or "").strip()
+        # Drop literal templates that VAPI didn't resolve (LLM sometimes passes them).
+        scene_name = "" if (scene_name_raw.startswith("{{") and scene_name_raw.endswith("}}")) else scene_name_raw.lower()
         user_ref = _first(args.get("user_ref"), vv.get("user_ref"))
         automation_id = _first(args.get("automation_id"), vv.get("automation_id"))
 

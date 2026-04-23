@@ -137,11 +137,19 @@
   script.async = true;
   script.onload = function () {
     try {
+      // Demo runs in DEFAULT MODE: home_id is set, enrollment-mode vars are
+      // empty strings so the assistant's system prompt substitutes them cleanly
+      // (rather than leaving literal "{{automation_id}}" in the prompt text).
       window.vapiInstance = window.vapiSDK.run({
         apiKey: config.publicKey,
         assistant: config.assistantId,
         assistantOverrides: {
-          variableValues: { home_id: config.homeId || "scott_home" },
+          variableValues: {
+            home_id:         config.homeId || "scott_home",
+            user_ref:        "",
+            automation_id:   "",
+            automation_name: "",
+          },
         },
         config: buttonConfig,
       });
