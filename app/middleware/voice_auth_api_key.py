@@ -1,24 +1,28 @@
 """Tier 1 API-key middleware for /api/v1/voice-auth/*.
 
-Reads MOBILE_API_KEYS_JSON env var, a dict of {platform_label: secret_key}:
+Reads API keys from environment variables. Two forms accepted (first wins):
 
-    MOBILE_API_KEYS_JSON='{"ios":"sk_ios_abc…","android":"sk_and_def…","web":"sk_web_ghi…"}'
+  1. Individual env vars (recommended — dodges Docker --env-file quote stripping):
+       MOBILE_API_KEY_IOS=sk_ios_abc…
+       MOBILE_API_KEY_ANDROID=sk_and_def…
+       MOBILE_API_KEY_WEB=sk_web_ghi…
+     Any env var matching MOBILE_API_KEY_<LABEL> registers that label.
+
+  2. JSON dict (convenient for local dev):
+       MOBILE_API_KEYS_JSON='{"ios":"sk_ios_…","android":"sk_and_…"}'
 
 Every request to the voice_auth_controller blueprint must carry:
 
     Authorization: Bearer <secret_key>
 
 On success:
-  - request.mobile_platform is set to the matching platform label
-  - audit log lines include the label
+  - g.mobile_platform is set to the matching platform label (lowercased)
 On failure:
   - 401 { "error": "unauthorized", "code": "UNAUTHORIZED" }
   - timing-safe comparison (no leaking of which keys are known)
 
-If MOBILE_API_KEYS_JSON is missing or empty, the middleware falls OPEN
-(allows all) and logs a prominent warning. This keeps local dev / CI
-working without mandatory keys, while production deploys that set the
-env get enforcement.
+If no keys are configured at all, the middleware falls OPEN (allows all)
+and logs a prominent warning — fine for local dev, bad for prod.
 
 Tier 2 will replace this with JWT-signed `sub=user_ref` claims; the
 header shape (`Authorization: Bearer ...`) stays the same, so mobile
@@ -37,6 +41,19 @@ logger = logging.getLogger(__name__)
 
 
 def _load_keys() -> Dict[str, str]:
+    # Prefer individual MOBILE_API_KEY_<LABEL> vars — robust against Docker
+    # --env-file quote stripping.
+    keys: Dict[str, str] = {}
+    prefix = "MOBILE_API_KEY_"
+    for k, v in os.environ.items():
+        if k.startswith(prefix) and v:
+            label = k[len(prefix):].lower()
+            if label:
+                keys[label] = v
+    if keys:
+        return keys
+
+    # Fallback: MOBILE_API_KEYS_JSON={"ios":"…","android":"…"}
     raw = os.environ.get("MOBILE_API_KEYS_JSON") or ""
     if not raw.strip():
         return {}
@@ -48,7 +65,7 @@ def _load_keys() -> Dict[str, str]:
     if not isinstance(data, dict):
         logger.error("MOBILE_API_KEYS_JSON: must be a JSON object {label: key}; got %s", type(data).__name__)
         return {}
-    return {str(k): str(v) for k, v in data.items() if v}
+    return {str(k).lower(): str(v) for k, v in data.items() if v}
 
 
 def _match_key(presented: str, keys: Dict[str, str]) -> Optional[str]:
