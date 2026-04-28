@@ -20,6 +20,23 @@ Endpoints:
   GET    /phone-lookup             return metadata for a phone number (used by VAPI phone webhook)
 
   GET    /automations/discover     query a home's HA live and list candidates
+  POST   /automations/trigger      fire (home_id, ha_service, ha_entity) directly;
+                                   refuses if an active enrollment gates the automation
+
+  POST   /scene-mappings           create scene -> webhook mapping (mobile-facing)
+  GET    /scene-mappings           list mappings for a home_id
+  GET    /scene-mappings/{id}      fetch one
+  PATCH  /scene-mappings/{id}      update name / webhook_id / is_active
+  DELETE /scene-mappings/{id}      remove
+
+  POST   /favorites                pin an HA entity for a user in a home
+  GET    /favorites                list favorites for (user_ref, home_id)
+  DELETE /favorites/{id}           remove a pinned entity
+  PATCH  /favorites/reorder        bulk-update positions (body: [{id, position}, ...])
+
+  POST   /voice-enable             provision a VAPI phone number for (user_ref, home_id)
+  GET    /voice-enable             status check by user_ref query param
+  DELETE /voice-enable             release VAPI number for ?user_ref=...
 
   POST   /vapi/call-start          webhook VAPI hits on inbound phone calls;
                                    returns assistantOverrides.variableValues
@@ -36,14 +53,19 @@ from typing import Optional
 from flask import jsonify, request
 
 from app.controllers.base_controller import BaseController
+from app.domain.models import FavoriteDevice, SceneWebhookMapping
 from app.domain.voice_auth_enums import (
     ChallengeResult,
     ChallengeType,
     EnrollmentStatus,
 )
 from app.domain.voice_auth_models import Enrollment, PhoneMapping
+from app.services.favorite_device_service import FavoriteDeviceService
+from app.services.scene_webhook_mapping_service import SceneWebhookMappingService
+from app.services.vapi_provisioning_service import VapiProvisioningService
 from app.services.voice_auth_service import VoiceAuthService
 from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
+from app.infrastructure.vapi.vapi_client import VapiClientError
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +92,31 @@ def enrollment_to_dict(e: Enrollment) -> dict:
     }
 
 
+def favorite_to_dict(f: FavoriteDevice) -> dict:
+    return {
+        "id": f.id,
+        "user_ref": f.user_ref,
+        "home_id": f.home_id,
+        "entity_id": f.entity_id,
+        "friendly_name": f.friendly_name,
+        "domain": f.domain,
+        "position": f.position,
+        "created_at": f.created_at.isoformat() if f.created_at else None,
+    }
+
+
+def scene_mapping_to_dict(m: SceneWebhookMapping) -> dict:
+    return {
+        "id": m.id,
+        "home_id": m.home_id,
+        "scene_name": m.scene_name,
+        "webhook_id": m.webhook_id,
+        "is_active": m.is_active,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+        "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+    }
+
+
 def phone_to_dict(p: PhoneMapping) -> dict:
     return {
         "id": p.id,
@@ -92,11 +139,17 @@ class VoiceAuthController(BaseController):
         *,
         service: VoiceAuthService,
         dispatcher: HADirectDispatcher,
+        scene_mapping_service: Optional[SceneWebhookMappingService] = None,
+        favorite_service: Optional[FavoriteDeviceService] = None,
+        vapi_provisioning_service: Optional[VapiProvisioningService] = None,
         url_prefix: str = "/api/v1/voice-auth",
     ):
         super().__init__("voice_auth_api", url_prefix)
         self._svc = service
         self._dispatcher = dispatcher
+        self._scenes = scene_mapping_service
+        self._favorites = favorite_service
+        self._vapi_prov = vapi_provisioning_service
         self._register_routes()
 
     def _register_routes(self) -> None:
@@ -117,6 +170,22 @@ class VoiceAuthController(BaseController):
         bp.add_url_rule("/phone-lookup", "phone_lookup", self.phone_lookup, methods=["GET"])
 
         bp.add_url_rule("/automations/discover", "discover_automations", self.discover_automations, methods=["GET"])
+        bp.add_url_rule("/automations/trigger", "trigger_automation", self.trigger_automation, methods=["POST"])
+
+        bp.add_url_rule("/scene-mappings", "create_scene_mapping", self.create_scene_mapping, methods=["POST"])
+        bp.add_url_rule("/scene-mappings", "list_scene_mappings", self.list_scene_mappings, methods=["GET"])
+        bp.add_url_rule("/scene-mappings/<mapping_id>", "get_scene_mapping", self.get_scene_mapping, methods=["GET"])
+        bp.add_url_rule("/scene-mappings/<mapping_id>", "update_scene_mapping", self.update_scene_mapping, methods=["PATCH"])
+        bp.add_url_rule("/scene-mappings/<mapping_id>", "delete_scene_mapping", self.delete_scene_mapping, methods=["DELETE"])
+
+        bp.add_url_rule("/favorites", "create_favorite", self.create_favorite, methods=["POST"])
+        bp.add_url_rule("/favorites", "list_favorites", self.list_favorites, methods=["GET"])
+        bp.add_url_rule("/favorites/reorder", "reorder_favorites", self.reorder_favorites, methods=["PATCH"])
+        bp.add_url_rule("/favorites/<favorite_id>", "delete_favorite", self.delete_favorite, methods=["DELETE"])
+
+        bp.add_url_rule("/voice-enable", "voice_enable", self.voice_enable, methods=["POST"])
+        bp.add_url_rule("/voice-enable", "voice_enable_status", self.voice_enable_status, methods=["GET"])
+        bp.add_url_rule("/voice-enable", "voice_disable", self.voice_disable, methods=["DELETE"])
 
         # NOTE: /vapi/call-start lives on the /vapi blueprint (routes/vapi.py)
         # to reuse X-Vapi-Secret auth; it is NOT part of the mobile-API surface.
@@ -342,4 +411,273 @@ class VoiceAuthController(BaseController):
             })
         entities.sort(key=lambda x: (x["domain"], x["entity_id"]))
         return jsonify({"home_id": home_id, "count": len(entities), "items": entities}), 200
+
+    # ------- direct trigger --------------------------------------------------
+
+    def trigger_automation(self):
+        """Fire an HA (service, entity) directly without a voice gate.
+
+        If an active enrollment exists for (user_ref, automation_id), refuses with
+        409 ENROLLMENT_REQUIRED — voice-gated automations cannot be bypassed via
+        this endpoint. The caller must take the VAPI challenge path instead.
+        """
+        body = request.get_json(silent=True) or {}
+        home_id = (body.get("home_id") or "").strip()
+        ha_service = (body.get("ha_service") or "").strip()
+        ha_entity = (body.get("ha_entity") or "").strip()
+        user_ref = (body.get("user_ref") or "").strip()
+        automation_id = (body.get("automation_id") or "").strip()
+
+        if not home_id or not ha_service or not ha_entity:
+            return jsonify({
+                "error": "home_id, ha_service, and ha_entity are required",
+                "code": "VALIDATION",
+            }), 400
+        if "." in ha_entity:
+            return jsonify({
+                "error": "ha_entity is the entity suffix only (e.g. 'decorations_on'), not 'script.decorations_on'",
+                "code": "VALIDATION",
+            }), 400
+
+        # Voice-gate guard: if (user_ref, automation_id) supplied AND an active
+        # enrollment exists, refuse — caller must use the VAPI flow.
+        if user_ref and automation_id:
+            check = self._svc.check(user_ref, automation_id)
+            if check.exists and check.enrollment and check.enrollment.status == EnrollmentStatus.ACTIVE:
+                return jsonify({
+                    "error": "this automation requires voice authentication",
+                    "code": "ENROLLMENT_REQUIRED",
+                    "enrollment_id": check.enrollment.id,
+                }), 409
+
+        result = self._dispatcher.dispatch_direct(home_id, ha_service, ha_entity)
+        status = 200 if result.success else 502
+        return jsonify({
+            "success": result.success,
+            "message": result.message,
+            "status_code": result.status_code,
+            "latency_ms": result.latency_ms,
+        }), status
+
+    # ------- scene-mapping CRUD (mobile-facing) ------------------------------
+
+    def _require_scenes(self):
+        if self._scenes is None:
+            return jsonify({
+                "error": "scene mapping service not configured",
+                "code": "NOT_CONFIGURED",
+            }), 503
+        return None
+
+    def create_scene_mapping(self):
+        err = self._require_scenes()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        home_id = (body.get("home_id") or "").strip()
+        scene_name = (body.get("scene_name") or "").strip()
+        webhook_id = (body.get("webhook_id") or "").strip()
+        if not home_id or not scene_name or not webhook_id:
+            return jsonify({
+                "error": "home_id, scene_name, and webhook_id are required",
+                "code": "VALIDATION",
+            }), 400
+        try:
+            m = self._scenes.create_mapping(
+                home_id=home_id, scene_name=scene_name, webhook_id=webhook_id,
+            )
+            return jsonify(scene_mapping_to_dict(m)), 201
+        except ValueError as ex:
+            return jsonify({"error": str(ex), "code": "VALIDATION"}), 400
+
+    def list_scene_mappings(self):
+        err = self._require_scenes()
+        if err:
+            return err
+        home_id = request.args.get("home_id", "").strip()
+        if not home_id:
+            return jsonify({"error": "home_id query param is required", "code": "VALIDATION"}), 400
+        items = self._scenes.list_scenes_for_home(home_id)
+        return jsonify({
+            "items": [scene_mapping_to_dict(m) for m in items],
+            "count": len(items),
+        }), 200
+
+    def get_scene_mapping(self, mapping_id: str):
+        err = self._require_scenes()
+        if err:
+            return err
+        m = self._scenes.get_mapping(mapping_id)
+        if not m:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(scene_mapping_to_dict(m)), 200
+
+    def update_scene_mapping(self, mapping_id: str):
+        err = self._require_scenes()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        try:
+            m = self._scenes.update_mapping(
+                mapping_id=mapping_id,
+                scene_name=body.get("scene_name"),
+                webhook_id=body.get("webhook_id"),
+                is_active=body.get("is_active"),
+            )
+            return jsonify(scene_mapping_to_dict(m)), 200
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 404
+
+    def delete_scene_mapping(self, mapping_id: str):
+        err = self._require_scenes()
+        if err:
+            return err
+        ok = self._scenes.delete_mapping(mapping_id)
+        if not ok:
+            return jsonify({"error": "not found"}), 404
+        return "", 204
+
+    # ------- favorites -------------------------------------------------------
+
+    def _require_favorites(self):
+        if self._favorites is None:
+            return jsonify({
+                "error": "favorite device service not configured",
+                "code": "NOT_CONFIGURED",
+            }), 503
+        return None
+
+    def create_favorite(self):
+        err = self._require_favorites()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        try:
+            f = self._favorites.add_favorite(
+                user_ref=body.get("user_ref") or "",
+                home_id=body.get("home_id") or "",
+                entity_id=body.get("entity_id") or "",
+                friendly_name=body.get("friendly_name"),
+                position=body.get("position"),
+            )
+            return jsonify(favorite_to_dict(f)), 201
+        except ValueError as ex:
+            return jsonify({"error": str(ex), "code": "VALIDATION"}), 400
+
+    def list_favorites(self):
+        err = self._require_favorites()
+        if err:
+            return err
+        user_ref = request.args.get("user_ref", "").strip()
+        home_id = request.args.get("home_id", "").strip()
+        if not user_ref or not home_id:
+            return jsonify({
+                "error": "user_ref and home_id query params are required",
+                "code": "VALIDATION",
+            }), 400
+        items = self._favorites.list_favorites(user_ref, home_id)
+        return jsonify({
+            "items": [favorite_to_dict(f) for f in items],
+            "count": len(items),
+        }), 200
+
+    def delete_favorite(self, favorite_id: str):
+        err = self._require_favorites()
+        if err:
+            return err
+        ok = self._favorites.remove_favorite(favorite_id)
+        if not ok:
+            return jsonify({"error": "not found"}), 404
+        return "", 204
+
+    def reorder_favorites(self):
+        err = self._require_favorites()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        items = body.get("items") if isinstance(body, dict) else body
+        if not isinstance(items, list):
+            return jsonify({
+                "error": "body must be {\"items\": [{\"id\":..., \"position\":...}]} or a JSON array",
+                "code": "VALIDATION",
+            }), 400
+        try:
+            updated = self._favorites.reorder(items)
+        except (ValueError, TypeError) as ex:
+            return jsonify({"error": str(ex), "code": "VALIDATION"}), 400
+        return jsonify({
+            "items": [favorite_to_dict(f) for f in updated],
+            "count": len(updated),
+        }), 200
+
+    # ------- voice-enable (VAPI provisioning) --------------------------------
+
+    def _require_vapi_prov(self):
+        if self._vapi_prov is None:
+            return jsonify({
+                "error": "VAPI provisioning service not configured",
+                "code": "NOT_CONFIGURED",
+            }), 503
+        return None
+
+    def voice_enable(self):
+        err = self._require_vapi_prov()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        try:
+            mapping = self._vapi_prov.enable(
+                user_ref=body.get("user_ref") or "",
+                home_id=body.get("home_id") or "",
+                area_code=body.get("area_code"),
+                label=body.get("label"),
+                assistant_id=body.get("assistant_id"),
+            )
+        except ValueError as ex:
+            return jsonify({"error": str(ex), "code": "VALIDATION"}), 400
+        except VapiClientError as ex:
+            logger.error(f"voice_enable VAPI error: {ex}")
+            return jsonify({
+                "error": f"VAPI provisioning failed: {ex}",
+                "code": "VAPI_ERROR",
+                "vapi_status": ex.status_code,
+            }), 502
+        return jsonify(phone_to_dict(mapping)), 201
+
+    def voice_enable_status(self):
+        err = self._require_vapi_prov()
+        if err:
+            return err
+        user_ref = request.args.get("user_ref", "").strip()
+        if not user_ref:
+            return jsonify({"error": "user_ref query param is required", "code": "VALIDATION"}), 400
+        try:
+            status = self._vapi_prov.status(user_ref)
+        except ValueError as ex:
+            return jsonify({"error": str(ex), "code": "VALIDATION"}), 400
+        return jsonify({
+            "enabled": status.enabled,
+            "is_dry_run": status.is_dry_run,
+            "mapping": phone_to_dict(status.mapping) if status.mapping else None,
+        }), 200
+
+    def voice_disable(self):
+        err = self._require_vapi_prov()
+        if err:
+            return err
+        user_ref = request.args.get("user_ref", "").strip()
+        if not user_ref:
+            return jsonify({"error": "user_ref query param is required", "code": "VALIDATION"}), 400
+        try:
+            removed = self._vapi_prov.disable(user_ref)
+        except VapiClientError as ex:
+            logger.error(f"voice_disable VAPI error: {ex}")
+            return jsonify({
+                "error": f"VAPI release failed: {ex}",
+                "code": "VAPI_ERROR",
+                "vapi_status": ex.status_code,
+            }), 502
+        if not removed:
+            return jsonify({"error": "no active VAPI mapping to release"}), 404
+        return "", 204
 

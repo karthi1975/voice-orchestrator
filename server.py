@@ -20,6 +20,9 @@ from app.middleware.auth_middleware import setup_auth_middleware
 from app.controllers.voice_auth_controller import VoiceAuthController
 from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
 from app.middleware.voice_auth_api_key import attach_mobile_api_key_auth
+from app.infrastructure.vapi.vapi_client import VapiClient
+from app.services.favorite_device_service import FavoriteDeviceService
+from app.services.vapi_provisioning_service import VapiProvisioningService
 from app.services.voice_auth_service import VoiceAuthService
 
 app = Flask(__name__)
@@ -105,11 +108,70 @@ def _build_voice_auth_service() -> VoiceAuthService:
     )
 
 
+def _build_favorite_service() -> FavoriteDeviceService:
+    """Wire FavoriteDeviceService against the same DB as VoiceAuthService.
+
+    Falls back to in-memory if DATABASE_URL is unset or the SQLAlchemy import
+    chain fails. The home repository (used for home_id existence checks) is
+    taken from the existing dependency container so we share its session pool.
+    """
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import scoped_session, sessionmaker
+            from app.repositories.implementations.sqlalchemy_models import Base
+            from app.repositories.implementations.sqlalchemy_favorite_device_repo import (
+                SQLAlchemyFavoriteDeviceRepository,
+            )
+
+            engine = create_engine(db_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
+            Base.metadata.create_all(engine)  # no-op if Alembic already ran
+            session_factory = scoped_session(sessionmaker(bind=engine, expire_on_commit=False))
+            session = session_factory()
+            _va_logger.info("FavoriteDeviceService: using SQLAlchemy repository")
+            return FavoriteDeviceService(
+                favorite_repository=SQLAlchemyFavoriteDeviceRepository(session),
+                home_repository=container.home_repository,
+            )
+        except Exception as e:
+            _va_logger.error(
+                f"FavoriteDeviceService: DB wiring failed ({e}); falling back to in-memory",
+                exc_info=True,
+            )
+
+    from app.repositories.implementations.in_memory_favorite_device_repo import (
+        InMemoryFavoriteDeviceRepository,
+    )
+    _va_logger.warning(
+        "FavoriteDeviceService: using IN-MEMORY repository (data will NOT persist across restarts)"
+    )
+    return FavoriteDeviceService(
+        favorite_repository=InMemoryFavoriteDeviceRepository(),
+        home_repository=container.home_repository,
+    )
+
+
 voice_auth_service = _build_voice_auth_service()
 voice_auth_dispatcher = HADirectDispatcher.from_env()
+favorite_service = _build_favorite_service()
+
+# VAPI provisioning. Falls into dry-run mode automatically when VAPI_API_KEY
+# is unset (see VapiClient). The default assistant id is reused from the
+# inbound webhook config (routes/vapi.py reads VAPI_ASSISTANT_ID).
+vapi_provisioning_service = VapiProvisioningService(
+    vapi_client=VapiClient(),
+    voice_auth_service=voice_auth_service,
+    default_assistant_id=os.environ.get("VAPI_ASSISTANT_ID") or None,
+    home_repository=container.home_repository,
+)
+
 voice_auth_controller = VoiceAuthController(
     service=voice_auth_service,
     dispatcher=voice_auth_dispatcher,
+    scene_mapping_service=container.scene_mapping_service,
+    favorite_service=favorite_service,
+    vapi_provisioning_service=vapi_provisioning_service,
 )
 
 # Tier 1 auth: bearer API key check on every /api/v1/voice-auth/* request.

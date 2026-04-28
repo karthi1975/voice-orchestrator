@@ -180,6 +180,35 @@ class AlexaUserMapping:
 
 
 @dataclass
+class FavoriteDevice:
+    """
+    A user's favorited Home Assistant device/entity for quick access.
+
+    Each row represents one entity pinned by one user within one home, with
+    an explicit ordering (`position`) for client-side display. The
+    (user_ref, home_id, entity_id) tuple is unique.
+
+    Attributes:
+        id: Unique row identifier (UUID)
+        user_ref: External user reference (matches enrollments.user_ref)
+        home_id: Home this entity lives in (FK to homes.home_id)
+        entity_id: Full HA entity_id, e.g. "light.kitchen"
+        friendly_name: Human-friendly label (cached at add-time; HA is source of truth)
+        domain: HA domain extracted from entity_id, e.g. "light", "scene"
+        position: Sort order within (user_ref, home_id); lower = earlier
+        created_at: When the favorite was added
+    """
+    id: str
+    user_ref: str
+    home_id: str
+    entity_id: str
+    friendly_name: str
+    domain: str
+    position: int = 0
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
 class OAuthToken:
     """
     OAuth token entity for Smart Home API authorization.
