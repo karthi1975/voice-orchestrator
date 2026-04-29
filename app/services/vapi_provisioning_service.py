@@ -20,11 +20,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from app.domain.voice_auth_models import PhoneMapping
 from app.infrastructure.vapi.vapi_client import VapiClient, VapiClientError
-from app.repositories.home_repository import IHomeRepository
 from app.services.voice_auth_service import VoiceAuthService
 
 logger = logging.getLogger(__name__)
@@ -44,12 +43,16 @@ class VapiProvisioningService:
         vapi_client: VapiClient,
         voice_auth_service: VoiceAuthService,
         default_assistant_id: Optional[str] = None,
-        home_repository: Optional[IHomeRepository] = None,
+        home_validator: Optional[Callable[[str], bool]] = None,
     ):
+        """
+        home_validator: callable(home_id) -> bool. Wire to
+        HADirectDispatcher.has_home so all services agree on home existence.
+        """
         self._vapi = vapi_client
         self._va = voice_auth_service
         self._default_assistant_id = default_assistant_id
-        self._homes = home_repository
+        self._home_valid = home_validator
 
     # ---- enable ------------------------------------------------------------
 
@@ -68,7 +71,7 @@ class VapiProvisioningService:
         if not home_id or not home_id.strip():
             raise ValueError("home_id is required")
 
-        if self._homes is not None and not self._homes.exists(home_id):
+        if self._home_valid is not None and not self._home_valid(home_id):
             raise ValueError(f"home '{home_id}' not found")
 
         # Idempotency: existing active mapping with a vapi_phone_number_id wins.

@@ -108,12 +108,12 @@ def _build_voice_auth_service() -> VoiceAuthService:
     )
 
 
-def _build_favorite_service() -> FavoriteDeviceService:
+def _build_favorite_service(home_validator) -> FavoriteDeviceService:
     """Wire FavoriteDeviceService against the same DB as VoiceAuthService.
 
-    Falls back to in-memory if DATABASE_URL is unset or the SQLAlchemy import
-    chain fails. The home repository (used for home_id existence checks) is
-    taken from the existing dependency container so we share its session pool.
+    home_validator: callable(home_id) -> bool. Pass HADirectDispatcher.has_home
+    so favorites validate against HOME_CONFIGS_JSON (same source of truth as
+    discover/trigger), not the admin-managed `homes` Postgres table.
     """
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
@@ -132,7 +132,7 @@ def _build_favorite_service() -> FavoriteDeviceService:
             _va_logger.info("FavoriteDeviceService: using SQLAlchemy repository")
             return FavoriteDeviceService(
                 favorite_repository=SQLAlchemyFavoriteDeviceRepository(session),
-                home_repository=container.home_repository,
+                home_validator=home_validator,
             )
         except Exception as e:
             _va_logger.error(
@@ -148,13 +148,13 @@ def _build_favorite_service() -> FavoriteDeviceService:
     )
     return FavoriteDeviceService(
         favorite_repository=InMemoryFavoriteDeviceRepository(),
-        home_repository=container.home_repository,
+        home_validator=home_validator,
     )
 
 
 voice_auth_service = _build_voice_auth_service()
 voice_auth_dispatcher = HADirectDispatcher.from_env()
-favorite_service = _build_favorite_service()
+favorite_service = _build_favorite_service(home_validator=voice_auth_dispatcher.has_home)
 
 # VAPI provisioning. Falls into dry-run mode automatically when VAPI_API_KEY
 # is unset (see VapiClient). The default assistant id is reused from the
@@ -163,7 +163,7 @@ vapi_provisioning_service = VapiProvisioningService(
     vapi_client=VapiClient(),
     voice_auth_service=voice_auth_service,
     default_assistant_id=os.environ.get("VAPI_ASSISTANT_ID") or None,
-    home_repository=container.home_repository,
+    home_validator=voice_auth_dispatcher.has_home,
 )
 
 voice_auth_controller = VoiceAuthController(

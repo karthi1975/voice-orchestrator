@@ -15,11 +15,10 @@ We just store what we're told.
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from app.domain.models import FavoriteDevice
 from app.repositories.favorite_device_repository import IFavoriteDeviceRepository
-from app.repositories.home_repository import IHomeRepository
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +27,16 @@ class FavoriteDeviceService:
     def __init__(
         self,
         favorite_repository: IFavoriteDeviceRepository,
-        home_repository: Optional[IHomeRepository] = None,
+        home_validator: Optional[Callable[[str], bool]] = None,
     ):
+        """
+        home_validator: callable(home_id) -> bool. Returns True if the home
+        is dispatchable. Wire this to HADirectDispatcher.has_home so favorites
+        share the same source of truth as discover/trigger (HOME_CONFIGS_JSON),
+        not the admin-managed `homes` table.
+        """
         self._repo = favorite_repository
-        self._homes = home_repository
+        self._home_valid = home_validator
 
     def add_favorite(
         self,
@@ -52,7 +57,7 @@ class FavoriteDeviceService:
         if not domain or not suffix:
             raise ValueError("entity_id must be of the form '<domain>.<suffix>'")
 
-        if self._homes is not None and not self._homes.exists(home_id):
+        if self._home_valid is not None and not self._home_valid(home_id):
             raise ValueError(f"home '{home_id}' not found")
 
         # Default friendly_name = suffix; client can override

@@ -98,6 +98,15 @@ class HADirectDispatcher:
         )
         return cls(homes, scenes, overrides, request_timeout_seconds)
 
+    def has_home(self, home_id: str) -> bool:
+        """Return True if home_id is registered in HOME_CONFIGS_JSON.
+
+        Authoritative for "is this a home the orchestrator can dispatch to?".
+        Other services (favorites, voice-enable provisioning) should use this
+        rather than the admin-managed `homes` Postgres table.
+        """
+        return bool(home_id) and home_id in self._homes
+
     def resolve_scene(self, home_id: str, scene_name: str) -> Optional[SceneTarget]:
         key = _normalize(scene_name)
         override = self._overrides.get(home_id, {}).get(key)
