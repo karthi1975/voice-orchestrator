@@ -402,6 +402,94 @@ curl -s -X PATCH "$BASE/favorites/reorder" \
   }'
 ```
 
+### 3.2.8 Worked example — search, add, remove a device
+
+End-to-end round-trip verified on production. Copy-paste, replace `USER` with
+your test user, and run top-to-bottom:
+
+```bash
+KEY=sk_ios_48b546d143dae04ec9d2c4396ae9155648e80a5ffbaf3377
+BASE=https://voiceorchestrator.homeadapt.us/api/v1/voice-auth
+USER=demo_user_42
+HOME=scott_home
+```
+
+**Step 1 — search for devices matching "bat".** Returns each with its
+`device_id`, name, manufacturer, current state, and per-user
+`is_favorited` flag.
+
+```bash
+curl -s -G "$BASE/items/search" \
+  -H "Authorization: Bearer $KEY" \
+  --data-urlencode "home_id=$HOME" \
+  --data-urlencode "kind=device" \
+  --data-urlencode "q=bat" \
+  --data-urlencode "user_ref=$USER"
+```
+
+Real response from prod (3 devices):
+
+```
+name                    device_id                            state
+Bat Cave Echo Show 5    d97e38a608fe463cd3cf0ea4a8e38850     unavailable
+Bat Sign                6b86cd8c539ad69b193a8ff2acbf3b4e     off
+Bathroom                71525ebcb48461b3bc93d2300994afe6     playing
+```
+
+**Step 2 — add Bat Sign to favorites by `device_id`.** No need to send
+`entity_id` or `friendly_name` — the server resolves both from the HA
+registry.
+
+```bash
+curl -s -X POST "$BASE/favorites" \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d "{\"user_ref\":\"$USER\",\"home_id\":\"$HOME\",\"device_id\":\"6b86cd8c539ad69b193a8ff2acbf3b4e\"}"
+```
+
+Response `201`:
+
+```json
+{
+  "id":                  "808dc489-eced-4327-bc60-ab1a690997b3",
+  "user_ref":            "demo_user_42",
+  "home_id":             "scott_home",
+  "entity_id":           "switch.bat_sign",
+  "friendly_name":       "Bat Sign",
+  "domain":              "switch",
+  "kind":                "device",
+  "device_id":           "6b86cd8c539ad69b193a8ff2acbf3b4e",
+  "primary_entity_id":   "switch.bat_sign",
+  "position":            0,
+  "voice_auth_required": false,
+  "created_at":          "2026-04-30T21:56:59.422121"
+}
+```
+
+Save the returned `id` (`808dc489-…`) — it's the favorite UUID you'll
+use for delete and fire.
+
+**Step 3 — remove the favorite by its UUID.**
+
+```bash
+curl -s -X DELETE "$BASE/favorites/808dc489-eced-4327-bc60-ab1a690997b3" \
+  -H "Authorization: Bearer $KEY" -w "HTTP %{http_code}\n"
+```
+
+Response: `HTTP 204` (empty body). A subsequent
+`GET /favorites?user_ref=$USER&home_id=$HOME` will show `count: 0`.
+
+**Notes for the implementation:**
+
+- For a *lock* device (e.g. `device_id` of the Yale Lock), step 2 returns
+  `voice_auth_required: true` and includes `voice_auth_enrollment_id`.
+  Tapping the tile next must hit `/favorites/{id}/fire`, which returns
+  `409 ENROLLMENT_REQUIRED` — route to VAPI from there.
+- For a *scene/script/automation*, send `entity_id` instead of `device_id`
+  in step 2: `{"user_ref":..., "home_id":..., "entity_id":"scene.good_morning"}`.
+- The mobile app should always re-fetch favorites via
+  `GET /favorites?user_ref=...&home_id=...` after any add/remove — the
+  server is the single source of truth (no client-side cache).
+
 ---
 
 ## 3.3 Scene Mappings
