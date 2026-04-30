@@ -266,21 +266,34 @@ toggle off via `DELETE /favorites/{id}` — no second roundtrip needed.
 
 ### 3.2.3 Add a favorite — by device OR by entity
 
-**Favoriting a device** (preferred path for physical things):
+**Required fields**: `user_ref`, `home_id`, and **exactly one** of `device_id`
+or `entity_id`. Everything else is optional.
+
+| Field | When | Notes |
+|---|---|---|
+| `user_ref` | always | scopes the favorite to one user |
+| `home_id` | always | scopes the favorite to one home |
+| `device_id` | for physical things | server resolves entity + name from HA registry |
+| `entity_id` | for scenes/scripts/automations | format `domain.suffix` |
+| `friendly_name` | optional | for `device_id` adds: defaults to HA's device name. for `entity_id` adds: defaults to the entity suffix (slug) — usually worth setting explicitly |
+| `position` | optional | defaults to next-after-last |
+
+**Favoriting a device** (no `friendly_name` needed — server pulls it from HA):
 ```bash
 curl -s -X POST "$BASE/favorites" \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{
-    "user_ref":      "scott_mobile",
-    "home_id":       "scott_home",
-    "device_id":     "6b86cd8c539ad69b193a8ff2acbf3b4e",
-    "friendly_name": "Bat Sign"
+    "user_ref":  "scott_mobile",
+    "home_id":   "scott_home",
+    "device_id": "6b86cd8c539ad69b193a8ff2acbf3b4e"
   }'
 ```
-The server resolves `primary_entity_id` from the HA registry and stores
-both fields. `friendly_name` defaults to the device's HA-registered name.
+The server resolves `entity_id`, `primary_entity_id`, `domain`, and
+`friendly_name` ("Bat Sign") from the HA device registry. You may still
+override `friendly_name` if the user has renamed the device in your app.
 
-**Favoriting a scene / script / HA automation** (no device behind them):
+**Favoriting a scene / script / HA automation** (no device behind them —
+`friendly_name` recommended so you don't get the slug):
 ```bash
 curl -s -X POST "$BASE/favorites" \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
