@@ -222,9 +222,14 @@ class FavoriteDeviceService:
             )
             return None
         try:
+            # CRITICAL: pass automation_id=entity_suffix so the enrollment's
+            # slug matches what /fire derives at trigger time (entity suffix).
+            # Without this, friendly_name="Yale Lock" -> "yale_lock" but the
+            # /fire path looks up "yale_yrd226_tsdb" -> mismatch -> bypass.
             enrollment = self._va.create_enrollment(
                 user_ref=user_ref,
                 home_id=home_id,
+                automation_id=entity_suffix,
                 automation_name=friendly_name,
                 ha_service="lock",
                 ha_entity=entity_suffix,
