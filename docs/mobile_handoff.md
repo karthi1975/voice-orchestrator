@@ -280,13 +280,7 @@ or `entity_id`. Everything else is optional.
 
 **Favoriting a device** (no `friendly_name` needed — server pulls it from HA):
 ```bash
-curl -s -X POST "$BASE/favorites" \
-  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{
-    "user_ref":  "scott_mobile",
-    "home_id":   "scott_home",
-    "device_id": "6b86cd8c539ad69b193a8ff2acbf3b4e"
-  }'
+curl -s -X POST "$BASE/favorites" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{"user_ref":"scott_mobile","home_id":"scott_home","device_id":"6b86cd8c539ad69b193a8ff2acbf3b4e"}'
 ```
 The server resolves `entity_id`, `primary_entity_id`, `domain`, and
 `friendly_name` ("Bat Sign") from the HA device registry. You may still
@@ -454,9 +448,7 @@ Bathroom                71525ebcb48461b3bc93d2300994afe6     playing
 registry.
 
 ```bash
-curl -s -X POST "$BASE/favorites" \
-  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d "{\"user_ref\":\"$USER\",\"home_id\":\"$HOME\",\"device_id\":\"6b86cd8c539ad69b193a8ff2acbf3b4e\"}"
+curl -s -X POST "$BASE/favorites" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d "{\"user_ref\":\"$USER\",\"home_id\":\"$HOME\",\"device_id\":\"6b86cd8c539ad69b193a8ff2acbf3b4e\"}"
 ```
 
 Response `201`:
