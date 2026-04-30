@@ -114,22 +114,43 @@ class HADirectDispatcher:
             return override
         return self._scenes.get(key)
 
+    # Per-domain default HA service action.
+    # Used when the caller doesn't supply an explicit `action`.
+    #   - `automation` must be `trigger` (turn_on only ENABLES the automation)
+    #   - `lock` defaults to `unlock` (the canonical "let me in" use case);
+    #     the favorites-lock flow always voice-gates this
+    #   - everything else uses `turn_on` (scenes, scripts, lights, switches, ...)
+    DEFAULT_ACTIONS: Dict[str, str] = {
+        "automation": "trigger",
+        "lock": "unlock",
+    }
+
     def dispatch_direct(
         self,
         home_id: str,
         service: str,
         entity: str,
+        action: Optional[str] = None,
     ) -> DispatchResult:
         """Fire a known (service, entity) pair for a home. Used by the voice-auth
         enrollment flow where the target is already resolved from the DB, so we
-        bypass the scene-catalog lookup."""
+        bypass the scene-catalog lookup.
+
+        `action` defaults to the domain-appropriate value (see DEFAULT_ACTIONS):
+          - automation -> trigger
+          - lock       -> unlock
+          - everything -> turn_on
+        Pass an explicit action to override (e.g. action="lock" to lock instead
+        of unlock, or action="turn_off").
+        """
         home = self._homes.get(home_id)
         if not home:
             msg = f"Unknown home_id: {home_id}"
             logger.warning(f"DISPATCH reject {msg}")
             return DispatchResult(False, msg)
         target = SceneTarget(service=service, entity=entity)
-        return self._do_post(home, target, source_label=f"{service}.{entity}")
+        resolved_action = action or self.DEFAULT_ACTIONS.get(service, "turn_on")
+        return self._do_post(home, target, source_label=f"{service}.{entity}", action=resolved_action)
 
     def dispatch(self, home_id: str, scene_name: str) -> DispatchResult:
         home = self._homes.get(home_id)
@@ -144,10 +165,16 @@ class HADirectDispatcher:
             logger.warning(f"DISPATCH reject {msg}")
             return DispatchResult(False, msg)
 
-        return self._do_post(home, target, source_label=scene_name)
+        return self._do_post(home, target, source_label=scene_name, action="turn_on")
 
-    def _do_post(self, home: "HomeConfig", target: "SceneTarget", source_label: str) -> DispatchResult:
-        url = f"{home.ha_url.rstrip('/')}/api/services/{target.service}/turn_on"
+    def _do_post(
+        self,
+        home: "HomeConfig",
+        target: "SceneTarget",
+        source_label: str,
+        action: str = "turn_on",
+    ) -> DispatchResult:
+        url = f"{home.ha_url.rstrip('/')}/api/services/{target.service}/{action}"
         headers = {
             "Authorization": f"Bearer {home.ha_token}",
             "Content-Type": "application/json",

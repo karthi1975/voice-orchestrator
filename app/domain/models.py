@@ -182,21 +182,31 @@ class AlexaUserMapping:
 @dataclass
 class FavoriteDevice:
     """
-    A user's favorited Home Assistant device/entity for quick access.
+    A user's favorited Home Assistant item — device, scene, script, automation,
+    or raw entity — pinned for quick access on the mobile dashboard.
 
-    Each row represents one entity pinned by one user within one home, with
-    an explicit ordering (`position`) for client-side display. The
-    (user_ref, home_id, entity_id) tuple is unique.
+    `entity_id` is always populated (it's the trigger target). For favorites
+    added at the device level, `entity_id` holds the device's resolved primary
+    entity, and `device_id` plus `kind="device"` capture the original intent.
+
+    The (user_ref, home_id, entity_id) tuple is unique — favoriting "Den Lamp"
+    as a device and `light.den_lamp` as an entity collide on the resolved
+    entity_id, which is correct (they activate the same HA service call).
 
     Attributes:
-        id: Unique row identifier (UUID)
-        user_ref: External user reference (matches enrollments.user_ref)
-        home_id: Home this entity lives in (FK to homes.home_id)
-        entity_id: Full HA entity_id, e.g. "light.kitchen"
-        friendly_name: Human-friendly label (cached at add-time; HA is source of truth)
-        domain: HA domain extracted from entity_id, e.g. "light", "scene"
-        position: Sort order within (user_ref, home_id); lower = earlier
-        created_at: When the favorite was added
+        id: Unique row identifier (UUID).
+        user_ref: External user reference (matches enrollments.user_ref).
+        home_id: Home this favorite lives in.
+        entity_id: HA entity_id used at trigger time. Always "<domain>.<suffix>".
+        friendly_name: Human-friendly label cached at add-time.
+        domain: HA domain extracted from entity_id, e.g. "light", "scene", "lock".
+        kind: One of {"device","entity","scene","script","automation"}.
+              Captures user intent at add-time and drives the mobile UI.
+        device_id: HA device_registry id (32-char hex), if favorited as device.
+        primary_entity_id: same as entity_id for device favorites; null otherwise.
+                           Stored for clarity / future-compat.
+        position: Sort order within (user_ref, home_id); lower = earlier.
+        created_at: When the favorite was added.
     """
     id: str
     user_ref: str
@@ -204,6 +214,9 @@ class FavoriteDevice:
     entity_id: str
     friendly_name: str
     domain: str
+    kind: str = "entity"
+    device_id: Optional[str] = None
+    primary_entity_id: Optional[str] = None
     position: int = 0
     created_at: datetime = field(default_factory=datetime.now)
 

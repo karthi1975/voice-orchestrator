@@ -312,7 +312,7 @@ class VoiceAuthPhoneMappingModel(Base):
 
 
 class FavoriteDeviceModel(Base):
-    """Per-user favorited HA entity (device, scene, scrip, etc.) within one home."""
+    """Per-user favorited HA item — device, entity, scene, script, automation."""
     __tablename__ = 'favorite_devices'
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -323,13 +323,18 @@ class FavoriteDeviceModel(Base):
     entity_id: Mapped[str] = mapped_column(String(255), nullable=False)
     friendly_name: Mapped[str] = mapped_column(String(255), nullable=False)
     domain: Mapped[str] = mapped_column(String(64), nullable=False)
+    # New in migration 008
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default='entity', server_default='entity')
+    device_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    primary_entity_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0')
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     __table_args__ = (
         Index('idx_favorite_user_home_entity', 'user_ref', 'home_id', 'entity_id', unique=True),
         Index('idx_favorite_user_home_position', 'user_ref', 'home_id', 'position'),
+        Index('idx_favorite_user_home_device', 'user_ref', 'home_id', 'device_id'),
     )
 
     def __repr__(self) -> str:
-        return f"<FavoriteDeviceModel(id={self.id}, user={self.user_ref}, entity={self.entity_id})>"
+        return f"<FavoriteDeviceModel(id={self.id}, user={self.user_ref}, entity={self.entity_id}, kind={self.kind})>"

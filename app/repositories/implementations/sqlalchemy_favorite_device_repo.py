@@ -74,6 +74,9 @@ class SQLAlchemyFavoriteDeviceRepository(IFavoriteDeviceRepository):
             entity_id=model.entity_id,
             friendly_name=model.friendly_name,
             domain=model.domain,
+            kind=model.kind or "entity",
+            device_id=model.device_id,
+            primary_entity_id=model.primary_entity_id,
             position=model.position,
             created_at=model.created_at,
         )
@@ -87,6 +90,9 @@ class SQLAlchemyFavoriteDeviceRepository(IFavoriteDeviceRepository):
             entity_id=favorite.entity_id,
             friendly_name=favorite.friendly_name,
             domain=favorite.domain,
+            kind=favorite.kind,
+            device_id=favorite.device_id,
+            primary_entity_id=favorite.primary_entity_id,
             position=favorite.position,
             created_at=favorite.created_at,
         )

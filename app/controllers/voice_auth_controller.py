@@ -29,10 +29,15 @@ Endpoints:
   PATCH  /scene-mappings/{id}      update name / webhook_id / is_active
   DELETE /scene-mappings/{id}      remove
 
-  POST   /favorites                pin an HA entity for a user in a home
+  POST   /favorites                pin a device or entity for a user in a home
+                                   body: {device_id} OR {entity_id}; locks auto-enroll
   GET    /favorites                list favorites for (user_ref, home_id)
-  DELETE /favorites/{id}           remove a pinned entity
+  DELETE /favorites/{id}           remove a pinned device/entity
   PATCH  /favorites/reorder        bulk-update positions (body: [{id, position}, ...])
+  POST   /favorites/{id}/fire      activate a favorite; refuses 409 if voice-gated
+
+  GET    /devices/discover         enumerate physical HA devices for a home
+  GET    /items/search             unified search across devices/entities/scenes/scripts/automations
 
   POST   /voice-enable             provision a VAPI phone number for (user_ref, home_id)
   GET    /voice-enable             status check by user_ref query param
@@ -60,10 +65,15 @@ from app.domain.voice_auth_enums import (
     EnrollmentStatus,
 )
 from app.domain.voice_auth_models import Enrollment, PhoneMapping
-from app.services.favorite_device_service import FavoriteDeviceService
+from app.services.favorite_device_service import (
+    ConflictingArgumentsError,
+    FavoriteDeviceService,
+    NoControllableEntityError,
+)
 from app.services.scene_webhook_mapping_service import SceneWebhookMappingService
 from app.services.vapi_provisioning_service import VapiProvisioningService
 from app.services.voice_auth_service import VoiceAuthService
+from app.infrastructure.home_assistant.device_registry import HADeviceRegistry
 from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
 from app.infrastructure.vapi.vapi_client import VapiClientError
 
@@ -92,7 +102,7 @@ def enrollment_to_dict(e: Enrollment) -> dict:
     }
 
 
-def favorite_to_dict(f: FavoriteDevice) -> dict:
+def favorite_to_dict(f: FavoriteDevice, *, voice_auth_required: bool = False) -> dict:
     return {
         "id": f.id,
         "user_ref": f.user_ref,
@@ -100,7 +110,11 @@ def favorite_to_dict(f: FavoriteDevice) -> dict:
         "entity_id": f.entity_id,
         "friendly_name": f.friendly_name,
         "domain": f.domain,
+        "kind": f.kind,
+        "device_id": f.device_id,
+        "primary_entity_id": f.primary_entity_id,
         "position": f.position,
+        "voice_auth_required": voice_auth_required,
         "created_at": f.created_at.isoformat() if f.created_at else None,
     }
 
@@ -142,6 +156,7 @@ class VoiceAuthController(BaseController):
         scene_mapping_service: Optional[SceneWebhookMappingService] = None,
         favorite_service: Optional[FavoriteDeviceService] = None,
         vapi_provisioning_service: Optional[VapiProvisioningService] = None,
+        device_registry: Optional[HADeviceRegistry] = None,
         url_prefix: str = "/api/v1/voice-auth",
     ):
         super().__init__("voice_auth_api", url_prefix)
@@ -150,6 +165,7 @@ class VoiceAuthController(BaseController):
         self._scenes = scene_mapping_service
         self._favorites = favorite_service
         self._vapi_prov = vapi_provisioning_service
+        self._registry = device_registry
         self._register_routes()
 
     def _register_routes(self) -> None:
@@ -182,6 +198,10 @@ class VoiceAuthController(BaseController):
         bp.add_url_rule("/favorites", "list_favorites", self.list_favorites, methods=["GET"])
         bp.add_url_rule("/favorites/reorder", "reorder_favorites", self.reorder_favorites, methods=["PATCH"])
         bp.add_url_rule("/favorites/<favorite_id>", "delete_favorite", self.delete_favorite, methods=["DELETE"])
+        bp.add_url_rule("/favorites/<favorite_id>/fire", "fire_favorite", self.fire_favorite, methods=["POST"])
+
+        bp.add_url_rule("/devices/discover", "discover_devices", self.discover_devices, methods=["GET"])
+        bp.add_url_rule("/items/search", "search_items", self.search_items, methods=["GET"])
 
         bp.add_url_rule("/voice-enable", "voice_enable", self.voice_enable, methods=["POST"])
         bp.add_url_rule("/voice-enable", "voice_enable_status", self.voice_enable_status, methods=["GET"])
@@ -547,22 +567,46 @@ class VoiceAuthController(BaseController):
             }), 503
         return None
 
+    def _is_voice_gated(self, user_ref: str, entity_id: str) -> tuple[bool, Optional[str]]:
+        """Return (is_gated, enrollment_id). True if an active enrollment exists
+        for (user_ref, automation_id derived from entity suffix)."""
+        if not entity_id or "." not in entity_id:
+            return False, None
+        suffix = entity_id.split(".", 1)[1]
+        check = self._svc.check(user_ref, suffix)
+        if check.exists and check.enrollment and check.enrollment.status == EnrollmentStatus.ACTIVE:
+            return True, check.enrollment.id
+        return False, None
+
     def create_favorite(self):
         err = self._require_favorites()
         if err:
             return err
         body = request.get_json(silent=True) or {}
         try:
-            f = self._favorites.add_favorite(
+            result = self._favorites.add_favorite(
                 user_ref=body.get("user_ref") or "",
                 home_id=body.get("home_id") or "",
-                entity_id=body.get("entity_id") or "",
+                entity_id=(body.get("entity_id") or None),
+                device_id=(body.get("device_id") or None),
                 friendly_name=body.get("friendly_name"),
                 position=body.get("position"),
             )
-            return jsonify(favorite_to_dict(f)), 201
+        except NoControllableEntityError as ex:
+            return jsonify({"error": str(ex), "code": "NO_CONTROLLABLE_ENTITY"}), 400
+        except ConflictingArgumentsError as ex:
+            return jsonify({"error": str(ex), "code": "VALIDATION"}), 400
         except ValueError as ex:
             return jsonify({"error": str(ex), "code": "VALIDATION"}), 400
+        except RuntimeError as ex:
+            return jsonify({"error": str(ex), "code": "DEPENDENCY_UNAVAILABLE"}), 503
+
+        f = result.favorite
+        gated = result.voice_auth_enrollment_id is not None
+        body_out = favorite_to_dict(f, voice_auth_required=gated)
+        if gated:
+            body_out["voice_auth_enrollment_id"] = result.voice_auth_enrollment_id
+        return jsonify(body_out), 201
 
     def list_favorites(self):
         err = self._require_favorites()
@@ -576,9 +620,14 @@ class VoiceAuthController(BaseController):
                 "code": "VALIDATION",
             }), 400
         items = self._favorites.list_favorites(user_ref, home_id)
+        # Annotate each with voice_auth_required (computed via enrollments)
+        out = []
+        for f in items:
+            gated, _ = self._is_voice_gated(user_ref, f.entity_id)
+            out.append(favorite_to_dict(f, voice_auth_required=gated))
         return jsonify({
-            "items": [favorite_to_dict(f) for f in items],
-            "count": len(items),
+            "items": out,
+            "count": len(out),
         }), 200
 
     def delete_favorite(self, favorite_id: str):
@@ -680,4 +729,222 @@ class VoiceAuthController(BaseController):
         if not removed:
             return jsonify({"error": "no active VAPI mapping to release"}), 404
         return "", 204
+
+    # ------- devices/discover -----------------------------------------------
+
+    def discover_devices(self):
+        if self._registry is None:
+            return jsonify({
+                "error": "device registry not configured",
+                "code": "NOT_CONFIGURED",
+            }), 503
+        home_id = request.args.get("home_id", "").strip()
+        if not home_id:
+            return jsonify({"error": "home_id query param is required", "code": "VALIDATION"}), 400
+        if not self._dispatcher.has_home(home_id):
+            return jsonify({"error": f"home '{home_id}' not configured", "code": "NOT_CONFIGURED"}), 404
+        devices = self._registry.list_devices(home_id)
+        return jsonify({
+            "home_id": home_id,
+            "count": len(devices),
+            "items": [
+                {
+                    "device_id": d.device_id,
+                    "name": d.name,
+                    "manufacturer": d.manufacturer,
+                    "model": d.model,
+                    "area": d.area,
+                    "primary_entity_id": d.primary_entity_id,
+                    "primary_domain": d.primary_domain,
+                    "is_controllable": d.is_controllable,
+                    "all_entities": d.all_entities,
+                }
+                for d in devices
+            ],
+        }), 200
+
+    # ------- items/search ---------------------------------------------------
+
+    def search_items(self):
+        """Unified search across devices, entities, scenes, scripts, automations.
+
+        Query params:
+          home_id  (required)   — which home's HA to search
+          q        (optional)   — case-insensitive substring on name + entity_id + device_id
+          kind     (optional)   — comma-separated subset of {device,entity,scene,script,automation}
+          user_ref (optional)   — when present, populate is_favorited + favorite_id flags per row
+          limit    (default 200, max 500)
+        """
+        if self._registry is None or self._favorites is None:
+            return jsonify({"error": "search not configured", "code": "NOT_CONFIGURED"}), 503
+
+        home_id = request.args.get("home_id", "").strip()
+        if not home_id:
+            return jsonify({"error": "home_id query param is required", "code": "VALIDATION"}), 400
+        if not self._dispatcher.has_home(home_id):
+            return jsonify({"error": f"home '{home_id}' not configured", "code": "NOT_CONFIGURED"}), 404
+
+        q = (request.args.get("q") or "").strip().lower()
+        kinds_raw = (request.args.get("kind") or "").strip().lower()
+        kind_filter = {k.strip() for k in kinds_raw.split(",") if k.strip()} if kinds_raw else None
+        user_ref = (request.args.get("user_ref") or "").strip()
+        try:
+            limit = min(int(request.args.get("limit", "200")), 500)
+        except ValueError:
+            limit = 200
+
+        # 1. Build per-user favorite lookup (entity_id -> favorite_id) for fast annotation
+        fav_by_entity: dict = {}
+        if user_ref:
+            for f in self._favorites.list_favorites(user_ref, home_id):
+                fav_by_entity[f.entity_id] = f.id
+
+        # 2. Pull devices and the raw HA states (for scenes/scripts/automations + orphan entities)
+        devices = self._registry.list_devices(home_id)
+
+        # State map for adding `state` field to results
+        cfg = self._dispatcher._homes.get(home_id)
+        states_by_entity: dict = {}
+        try:
+            import requests as _rq
+            r = _rq.get(
+                f"{cfg.ha_url.rstrip('/')}/api/states",
+                headers={"Authorization": f"Bearer {cfg.ha_token}"},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                for s in r.json():
+                    states_by_entity[s.get("entity_id", "")] = {
+                        "state": s.get("state"),
+                        "friendly_name": (s.get("attributes") or {}).get("friendly_name"),
+                    }
+        except Exception as e:
+            logger.warning(f"search_items: states fetch failed home={home_id}: {e}")
+
+        # 3. Build candidate items
+        items: list = []
+
+        # Devices
+        if kind_filter is None or "device" in kind_filter:
+            for d in devices:
+                if not d.is_controllable:
+                    continue
+                primary = d.primary_entity_id or ""
+                state_info = states_by_entity.get(primary, {})
+                items.append({
+                    "kind": "device",
+                    "device_id": d.device_id,
+                    "entity_id": primary,
+                    "name": d.name,
+                    "domain": d.primary_domain,
+                    "manufacturer": d.manufacturer,
+                    "model": d.model,
+                    "area": d.area,
+                    "state": state_info.get("state"),
+                    "is_favorited": primary in fav_by_entity,
+                    "favorite_id": fav_by_entity.get(primary),
+                    "_match_blob": " ".join(filter(None, [
+                        d.name or "", d.device_id or "", primary,
+                        d.manufacturer or "", d.model or "",
+                    ])).lower(),
+                })
+
+        # Activations (scene/script/automation) and orphan controllable entities
+        ACTIVATION = {"scene", "script", "automation"}
+        ALLOWED_ENTITY_DOMS = {"input_boolean"}  # raw entities — narrow allowlist
+        # Entities that belong to a device are surfaced via the device row above,
+        # so skip them here to avoid duplicates.
+        device_entities = {e for d in devices for e in d.all_entities}
+
+        for entity_id, info in states_by_entity.items():
+            if "." not in entity_id:
+                continue
+            dom = entity_id.split(".", 1)[0]
+            if dom in ACTIVATION:
+                k = dom
+            elif entity_id in device_entities:
+                continue
+            elif dom in ALLOWED_ENTITY_DOMS:
+                k = "entity"
+            else:
+                continue
+            if kind_filter is not None and k not in kind_filter:
+                continue
+            name = info.get("friendly_name") or entity_id.split(".", 1)[1]
+            items.append({
+                "kind": k,
+                "device_id": None,
+                "entity_id": entity_id,
+                "name": name,
+                "domain": dom,
+                "manufacturer": None,
+                "model": None,
+                "area": None,
+                "state": info.get("state"),
+                "is_favorited": entity_id in fav_by_entity,
+                "favorite_id": fav_by_entity.get(entity_id),
+                "_match_blob": (name + " " + entity_id).lower(),
+            })
+
+        # 4. Apply q substring filter
+        if q:
+            items = [i for i in items if q in i["_match_blob"]]
+
+        # 5. Sort: kind priority (devices first, then activations, then entities), then alphabetical
+        kind_order = {"device": 0, "scene": 1, "script": 2, "automation": 3, "entity": 4}
+        items.sort(key=lambda i: (kind_order.get(i["kind"], 9), (i["name"] or "").lower()))
+
+        # 6. Strip helper field, apply limit
+        for i in items:
+            i.pop("_match_blob", None)
+        items = items[:limit]
+
+        return jsonify({
+            "home_id": home_id,
+            "count": len(items),
+            "items": items,
+        }), 200
+
+    # ------- favorites/{id}/fire --------------------------------------------
+
+    def fire_favorite(self, favorite_id: str):
+        """Activate a favorite. Refuses 409 if voice-gated.
+
+        Body (optional): { "action": "<turn_on|turn_off|trigger|lock|unlock>" }
+        Default action is per-domain (see HADirectDispatcher.DEFAULT_ACTIONS).
+        """
+        err = self._require_favorites()
+        if err:
+            return err
+        f = self._favorites.get(favorite_id)
+        if not f:
+            return jsonify({"error": "favorite not found"}), 404
+
+        # Voice-gate check — locks always end up here
+        gated, enroll_id = self._is_voice_gated(f.user_ref, f.entity_id)
+        if gated:
+            return jsonify({
+                "error": "this favorite requires voice authentication",
+                "code": "ENROLLMENT_REQUIRED",
+                "enrollment_id": enroll_id,
+                "automation_name": f.friendly_name,
+                "automation_id": f.entity_id.split(".", 1)[1] if "." in f.entity_id else None,
+                "home_id": f.home_id,
+            }), 409
+
+        body = request.get_json(silent=True) or {}
+        action = (body.get("action") or "").strip() or None
+        if "." not in f.entity_id:
+            return jsonify({"error": "favorite has malformed entity_id"}), 500
+        ha_service, ha_entity = f.entity_id.split(".", 1)
+        result = self._dispatcher.dispatch_direct(f.home_id, ha_service, ha_entity, action=action)
+        status = 200 if result.success else 502
+        return jsonify({
+            "success": result.success,
+            "message": result.message,
+            "status_code": result.status_code,
+            "latency_ms": result.latency_ms,
+            "favorite_id": f.id,
+            "entity_id": f.entity_id,
+        }), status
 

@@ -18,6 +18,7 @@ from routes.vapi import vapi_bp
 from app import DependencyContainer
 from app.middleware.auth_middleware import setup_auth_middleware
 from app.controllers.voice_auth_controller import VoiceAuthController
+from app.infrastructure.home_assistant.device_registry import HADeviceRegistry
 from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
 from app.middleware.voice_auth_api_key import attach_mobile_api_key_auth
 from app.infrastructure.vapi.vapi_client import VapiClient
@@ -108,13 +109,8 @@ def _build_voice_auth_service() -> VoiceAuthService:
     )
 
 
-def _build_favorite_service(home_validator) -> FavoriteDeviceService:
-    """Wire FavoriteDeviceService against the same DB as VoiceAuthService.
-
-    home_validator: callable(home_id) -> bool. Pass HADirectDispatcher.has_home
-    so favorites validate against HOME_CONFIGS_JSON (same source of truth as
-    discover/trigger), not the admin-managed `homes` Postgres table.
-    """
+def _build_favorite_service(home_validator, device_registry, voice_auth_service) -> FavoriteDeviceService:
+    """Wire FavoriteDeviceService against the same DB as VoiceAuthService."""
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
         try:
@@ -133,6 +129,8 @@ def _build_favorite_service(home_validator) -> FavoriteDeviceService:
             return FavoriteDeviceService(
                 favorite_repository=SQLAlchemyFavoriteDeviceRepository(session),
                 home_validator=home_validator,
+                device_registry=device_registry,
+                voice_auth_service=voice_auth_service,
             )
         except Exception as e:
             _va_logger.error(
@@ -149,12 +147,19 @@ def _build_favorite_service(home_validator) -> FavoriteDeviceService:
     return FavoriteDeviceService(
         favorite_repository=InMemoryFavoriteDeviceRepository(),
         home_validator=home_validator,
+        device_registry=device_registry,
+        voice_auth_service=voice_auth_service,
     )
 
 
 voice_auth_service = _build_voice_auth_service()
 voice_auth_dispatcher = HADirectDispatcher.from_env()
-favorite_service = _build_favorite_service(home_validator=voice_auth_dispatcher.has_home)
+device_registry = HADeviceRegistry(voice_auth_dispatcher, cache_ttl_seconds=60)
+favorite_service = _build_favorite_service(
+    home_validator=voice_auth_dispatcher.has_home,
+    device_registry=device_registry,
+    voice_auth_service=voice_auth_service,
+)
 
 # VAPI provisioning. Falls into dry-run mode automatically when VAPI_API_KEY
 # is unset (see VapiClient). The default assistant id is reused from the
@@ -172,6 +177,7 @@ voice_auth_controller = VoiceAuthController(
     scene_mapping_service=container.scene_mapping_service,
     favorite_service=favorite_service,
     vapi_provisioning_service=vapi_provisioning_service,
+    device_registry=device_registry,
 )
 
 # Tier 1 auth: bearer API key check on every /api/v1/voice-auth/* request.
