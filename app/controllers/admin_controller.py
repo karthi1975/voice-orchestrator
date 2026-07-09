@@ -5,7 +5,7 @@ REST API endpoints for administrative operations.
 """
 
 import logging
-from typing import Tuple, Any
+from typing import Tuple, Any, Optional
 from flask import request
 from app.controllers.base_controller import BaseController
 from app.services.user_service import UserService
@@ -665,6 +665,10 @@ class AdminController(BaseController):
         """
         self.log_request('create_alexa_mapping')
 
+        unavailable = self._alexa_mappings_unavailable()
+        if unavailable:
+            return unavailable
+
         try:
             data = self.get_request_json()
             req = CreateAlexaMappingRequest.from_dict(data)
@@ -695,9 +699,25 @@ class AdminController(BaseController):
         """
         self.log_request('list_alexa_mappings')
 
+        # In-memory mode has no Alexa mapping storage: return an empty list
+        # (not an error) so dashboard stats keep working in local dev.
+        if self._alexa_mapping_service is None:
+            return self.json_response({
+                'mappings': [], 'total': 0,
+                'note': 'Alexa mappings require database mode (USE_DATABASE=true + DATABASE_URL)',
+            }, 200)
+
         mappings = self._alexa_mapping_service.list_all_mappings()
         response = AlexaMappingListResponse.from_models(mappings)
         return self.json_response(response.to_dict(), 200)
+
+    def _alexa_mappings_unavailable(self) -> Optional[Tuple[Any, int]]:
+        """503 response when running without a database, else None."""
+        if self._alexa_mapping_service is None:
+            return self.error_response(
+                "Alexa mappings are unavailable: server is running in-memory. "
+                "Set USE_DATABASE=true and DATABASE_URL to enable them.", 503)
+        return None
 
     def get_alexa_mapping(self, alexa_user_id: str) -> Tuple[Any, int]:
         """
@@ -711,6 +731,10 @@ class AdminController(BaseController):
             404: Mapping not found
         """
         self.log_request(f'get_alexa_mapping:{alexa_user_id[:20]}...')
+
+        unavailable = self._alexa_mappings_unavailable()
+        if unavailable:
+            return unavailable
 
         mapping = self._alexa_mapping_service.get_mapping(alexa_user_id)
         if not mapping:
@@ -737,6 +761,10 @@ class AdminController(BaseController):
             400: Validation error
         """
         self.log_request(f'update_alexa_mapping:{alexa_user_id[:20]}...')
+
+        unavailable = self._alexa_mappings_unavailable()
+        if unavailable:
+            return unavailable
 
         try:
             data = self.get_request_json()
@@ -768,6 +796,10 @@ class AdminController(BaseController):
             404: Mapping not found
         """
         self.log_request(f'delete_alexa_mapping:{alexa_user_id[:20]}...')
+
+        unavailable = self._alexa_mappings_unavailable()
+        if unavailable:
+            return unavailable
 
         try:
             self._alexa_mapping_service.delete_mapping(alexa_user_id)

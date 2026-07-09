@@ -1514,7 +1514,14 @@
                     renderMappings(allMappings, homesMap);
                     document.getElementById('mappingsTable').style.display = 'block';
                 } else {
-                    document.getElementById('mappingsEmpty').style.display = 'block';
+                    const emptyEl = document.getElementById('mappingsEmpty');
+                    if (mappingsData.note) {
+                        emptyEl.innerHTML = `
+                            <span class="material-icons">storage</span>
+                            <div>${mappingsData.note}</div>
+                        `;
+                    }
+                    emptyEl.style.display = 'block';
                 }
 
                 // Also load unmapped users when viewing mappings tab
