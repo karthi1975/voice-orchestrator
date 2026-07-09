@@ -579,6 +579,10 @@
                     <div class="stat-value" id="stat-test-mode">0</div>
                     <div class="stat-label">Test Mode Active</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-pending">0</div>
+                    <div class="stat-label">Pending Signups</div>
+                </div>
             </div>
 
             <div class="card">
@@ -587,7 +591,8 @@
                     Quick Start Guide
                 </div>
                 <ol style="line-height: 2; padding-left: 20px;">
-                    <li><strong>Create a User</strong> - Go to Users tab and add a new user</li>
+                    <li><strong>Approve Signups</strong> - Mobile-app signups appear under Users &rarr; Pending Signups; activate them, then attach their home</li>
+                    <li><strong>Create a User</strong> - Go to Users tab and add a new user (set a password to enable mobile app login)</li>
                     <li><strong>Create a Home</strong> - Go to Homes tab and register their home with Home Assistant URL</li>
                     <li><strong>Enable Test Mode</strong> - Toggle test mode for the home to test without Home Assistant</li>
                     <li><strong>Add Alexa Mapping</strong> - Go to Alexa Mappings tab and link their Alexa user ID to the home</li>
@@ -620,7 +625,17 @@
                         <div class="form-field">
                             <label class="form-label" for="user-email">Email</label>
                             <input type="email" id="user-email" class="form-input">
-                            <div class="form-hint">Optional</div>
+                            <div class="form-hint">Optional — used for mobile app login</div>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label" for="user-userid">User ID</label>
+                            <input type="text" id="user-userid" class="form-input">
+                            <div class="form-hint">Optional — set to an existing mobile user_ref (e.g. scott_mobile) so historical data stays attached; otherwise auto-generated</div>
+                        </div>
+                        <div class="form-field">
+                            <label class="form-label" for="user-password">Mobile Login Password</label>
+                            <input type="password" id="user-password" class="form-input" minlength="8" autocomplete="new-password">
+                            <div class="form-hint">Optional — enables mobile app login (8-256 chars)</div>
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary">
@@ -628,6 +643,37 @@
                         Create User
                     </button>
                 </form>
+            </div>
+
+            <!-- Pending Signups -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="material-icons">how_to_reg</span>
+                    Pending Signups
+                    <button class="btn btn-secondary btn-small" onclick="loadPendingUsers()" style="margin-left: auto;">
+                        <span class="material-icons">refresh</span>
+                        Refresh
+                    </button>
+                </div>
+                <div id="pendingTable" style="display: none;">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Email</th>
+                                    <th>Full Name</th>
+                                    <th>Signed Up</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pendingBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="pendingEmpty" class="empty-state" style="display: none;">
+                    <span class="material-icons">check_circle</span>
+                    <div>No signups waiting for approval.</div>
+                </div>
             </div>
 
             <!-- Users List -->
@@ -979,7 +1025,7 @@
             document.getElementById(`tab-${tabName}`).classList.add('active');
 
             // Reload data for the active tab
-            if (tabName === 'users') loadUsers();
+            if (tabName === 'users') { loadUsers(); loadPendingUsers(); }
             if (tabName === 'homes') loadHomes();
             if (tabName === 'mappings') loadMappings();
             if (tabName === 'scenes') loadSceneMappings();
@@ -1027,8 +1073,112 @@
 
                 const testModeCount = homes.homes ? homes.homes.filter(h => h.test_mode).length : 0;
                 document.getElementById('stat-test-mode').textContent = testModeCount;
+
+                const pendingResp = await fetch(`${API_BASE}/users/pending`);
+                const pending = await pendingResp.json();
+                document.getElementById('stat-pending').textContent = pending.count || 0;
             } catch (error) {
                 console.error('Error loading stats:', error);
+            }
+        }
+
+        // === PENDING SIGNUPS ===
+        async function loadPendingUsers() {
+            try {
+                const response = await fetch(`${API_BASE}/users/pending`);
+                const data = await response.json();
+                const pending = data.users || [];
+
+                if (pending.length > 0) {
+                    document.getElementById('pendingBody').innerHTML = pending.map(user => `
+                        <tr>
+                            <td><strong>${user.email || '-'}</strong></td>
+                            <td>${user.full_name}</td>
+                            <td>${formatDate(user.created_at)}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn btn-primary btn-small" onclick="activatePendingUser('${user.user_id}', '${user.email || user.username}')" title="Activate account">
+                                        <span class="material-icons">check</span>
+                                        Activate
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `).join('');
+                    document.getElementById('pendingTable').style.display = 'block';
+                    document.getElementById('pendingEmpty').style.display = 'none';
+                } else {
+                    document.getElementById('pendingTable').style.display = 'none';
+                    document.getElementById('pendingEmpty').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error loading pending signups:', error);
+            }
+        }
+
+        async function activatePendingUser(userId, label) {
+            if (!confirm(`Activate account for ${label}?\n\nRemember to attach their home afterwards (Homes tab) so the app can find it.`)) return;
+            try {
+                const response = await fetch(`${API_BASE}/users/${userId}/activate`, { method: 'POST' });
+                if (response.ok) {
+                    showAlert(`Account activated: ${label}. Now attach their home in the Homes tab.`, 'success');
+                    loadPendingUsers();
+                    loadUsers();
+                    loadStats();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || 'Failed to activate account', 'error');
+                }
+            } catch (error) {
+                console.error('Error activating user:', error);
+                showAlert('Failed to activate account', 'error');
+            }
+        }
+
+        async function setUserPassword(userId, username) {
+            const password = prompt(`New mobile-login password for "${username}" (8-256 characters):`);
+            if (password === null) return;
+            if (password.length < 8) {
+                showAlert('Password must be at least 8 characters', 'error');
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE}/users/${userId}/password`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: password })
+                });
+                if (response.ok) {
+                    showAlert(`Password set for ${username}`, 'success');
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || 'Failed to set password', 'error');
+                }
+            } catch (error) {
+                console.error('Error setting password:', error);
+                showAlert('Failed to set password', 'error');
+            }
+        }
+
+        async function toggleUserActive(userId, username, isActive) {
+            const verb = isActive ? 'Deactivate' : 'Reactivate';
+            if (!confirm(`${verb} user "${username}"?${isActive ? '\n\nThey will no longer be able to log in from the mobile app.' : ''}`)) return;
+            try {
+                const response = isActive
+                    ? await fetch(`${API_BASE}/users/${userId}`, { method: 'DELETE' })
+                    : await fetch(`${API_BASE}/users/${userId}/activate`, { method: 'POST' });
+                if (response.ok) {
+                    showAlert(`${verb}d ${username}`, 'success');
+                    loadUsers();
+                    loadPendingUsers();
+                    loadStats();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || `Failed to ${verb.toLowerCase()} user`, 'error');
+                }
+            } catch (error) {
+                console.error('Error toggling user:', error);
+                showAlert(`Failed to ${verb.toLowerCase()} user`, 'error');
             }
         }
 
@@ -1076,6 +1226,12 @@
                             <button class="btn btn-icon btn-small" onclick="viewUserHomes('${user.user_id}')" title="View Homes">
                                 <span class="material-icons">home</span>
                             </button>
+                            <button class="btn btn-icon btn-small" onclick="setUserPassword('${user.user_id}', '${user.username}')" title="Set mobile-login password">
+                                <span class="material-icons">key</span>
+                            </button>
+                            <button class="btn btn-icon btn-small" ${user.is_active ? 'style="color: var(--error);"' : ''} onclick="toggleUserActive('${user.user_id}', '${user.username}', ${user.is_active})" title="${user.is_active ? 'Deactivate user' : 'Reactivate user'}">
+                                <span class="material-icons">${user.is_active ? 'person_off' : 'person'}</span>
+                            </button>
                         </div>
                     </td>
                 </tr>
@@ -1088,6 +1244,13 @@
             const username = document.getElementById('user-username').value;
             const fullName = document.getElementById('user-fullname').value;
             const email = document.getElementById('user-email').value;
+            const userId = document.getElementById('user-userid').value.trim();
+            const password = document.getElementById('user-password').value;
+
+            if (password && password.length < 8) {
+                showAlert('Password must be at least 8 characters', 'error');
+                return;
+            }
 
             try {
                 const response = await fetch(`${API_BASE}/users`, {
@@ -1096,7 +1259,9 @@
                     body: JSON.stringify({
                         username: username,
                         full_name: fullName,
-                        email: email || null
+                        email: email || null,
+                        user_id: userId || null,
+                        password: password || null
                     })
                 });
 
@@ -1723,6 +1888,7 @@
             if (authenticated) {
                 loadStats();
                 loadUsers();
+                loadPendingUsers();
                 loadUserDropdowns();
                 loadHomeDropdowns();
             }
