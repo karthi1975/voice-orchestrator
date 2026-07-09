@@ -28,8 +28,17 @@ from app.services.voice_auth_service import VoiceAuthService
 
 app = Flask(__name__)
 
-# Configure session (required for authentication)
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-2024')
+# Configure session (required for authentication). A hardcoded fallback would
+# make admin session cookies forgeable by anyone who reads this repo, so when
+# SECRET_KEY is unset we generate an ephemeral one (sessions reset on restart).
+app.secret_key = os.environ.get('SECRET_KEY') or ''
+if not app.secret_key:
+    import secrets as _secrets
+    app.secret_key = _secrets.token_hex(32)
+    logging.getLogger(__name__).warning(
+        "⚠ SECRET_KEY is not set — using an ephemeral session secret. "
+        "Admin sessions will not survive a restart. Set SECRET_KEY in production."
+    )
 app.config['SESSION_COOKIE_NAME'] = 'admin_session'
 app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # No JavaScript access
@@ -180,9 +189,29 @@ voice_auth_controller = VoiceAuthController(
     device_registry=device_registry,
 )
 
+# Tier 2 auth: mobile login + identity bootstrap. Reuses the container's
+# user/home repositories (SQLAlchemy when DATABASE_URL is set), so the same
+# users/homes the admin API manages back the mobile login.
+from app.services.mobile_auth_service import MobileAuthService
+from app.controllers.mobile_auth_controller import MobileAuthController
+
+mobile_auth_service = MobileAuthService(
+    user_repository=container.user_repository,
+    home_repository=container.home_repository,
+)
+mobile_auth_controller = MobileAuthController(service=mobile_auth_service)
+app.register_blueprint(mobile_auth_controller.blueprint)
+
 # Tier 1 auth: bearer API key check on every /api/v1/voice-auth/* request.
-# Falls open (dev-friendly) when MOBILE_API_KEYS_JSON is unset.
-attach_mobile_api_key_auth(voice_auth_controller.blueprint)
+# Falls open (dev-friendly) when MOBILE_API_KEYS_JSON is unset. JWTs from
+# POST /auth/login are also accepted; static platform keys keep working.
+attach_mobile_api_key_auth(
+    voice_auth_controller.blueprint,
+    token_verifier=mobile_auth_service.verify_token,
+    # JWT callers may only touch homes they own (per the homes table).
+    # Static-key callers are unaffected.
+    is_home_owner=container.home_repository.exists_for_user,
+)
 app.register_blueprint(voice_auth_controller.blueprint)
 
 # Expose on the app object so routes/vapi.py can pick it up via current_app

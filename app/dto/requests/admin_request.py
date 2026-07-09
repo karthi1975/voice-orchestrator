@@ -18,10 +18,15 @@ class CreateUserRequest(BaseDTO):
         username: Unique username
         full_name: User's full name
         email: Optional email address
+        user_id: Optional explicit user ID (align with an existing mobile
+                 user_ref so historical favorites/enrollments stay attached)
+        password: Optional plain-text password enabling mobile app login
     """
     username: str
     full_name: str
     email: Optional[str] = None
+    user_id: Optional[str] = None
+    password: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CreateUserRequest':
@@ -29,7 +34,9 @@ class CreateUserRequest(BaseDTO):
         return cls(
             username=require_field(data, 'username'),
             full_name=require_field(data, 'full_name'),
-            email=get_field(data, 'email')
+            email=get_field(data, 'email'),
+            user_id=get_field(data, 'user_id'),
+            password=get_field(data, 'password')
         )
 
     def to_dict(self) -> Dict[str, Any]:

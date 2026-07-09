@@ -47,7 +47,8 @@ class SQLAlchemyUserRepository(IUserRepository):
             full_name=model.full_name,
             email=model.email,
             is_active=model.is_active,
-            created_at=model.created_at
+            created_at=model.created_at,
+            password_hash=model.password_hash
         )
 
     def _to_model(self, user: User) -> UserModel:
@@ -66,7 +67,8 @@ class SQLAlchemyUserRepository(IUserRepository):
             full_name=user.full_name,
             email=user.email,
             is_active=user.is_active,
-            created_at=user.created_at
+            created_at=user.created_at,
+            password_hash=user.password_hash
         )
 
     def add(self, user: User) -> User:
@@ -118,6 +120,7 @@ class SQLAlchemyUserRepository(IUserRepository):
         model.full_name = user.full_name
         model.email = user.email
         model.is_active = user.is_active
+        model.password_hash = user.password_hash
 
         self._session.commit()
         self._session.refresh(model)

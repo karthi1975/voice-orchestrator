@@ -42,6 +42,82 @@ BASE=https://voiceorchestrator.homeadapt.us/api/v1/voice-auth
 
 ---
 
+## 2.1 App Startup: getting `user_ref` and `home_id` (STOP hardcoding them)
+
+Until now the examples hardcoded `user_ref: "scott_mobile"` and
+`home_id: "scott_home"`. Those values are now discoverable per user — the
+app should fetch and cache them on startup instead.
+
+### Login
+
+```bash
+curl -s -X POST "$BASE/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "scott@example.com", "password": "********"}'
+```
+
+No `Authorization` header needed on this call. `username` is accepted in
+place of `email`. Response `200`:
+
+```json
+{
+  "token":           "eyJhbGciOiJIUzI1NiIs…",
+  "token_type":      "Bearer",
+  "expires_in":      2592000,
+  "user_ref":        "scott_mobile",
+  "user_id":         "scott_mobile",
+  "username":        "scott",
+  "email":           "scott@example.com",
+  "full_name":       "Scott",
+  "homes":           [ { "home_id": "scott_home", "name": "Scott's House" } ],
+  "default_home_id": "scott_home"
+}
+```
+
+Wrong credentials → `401 {"error": "Invalid credentials", "code": "UNAUTHORIZED"}`.
+After 5 failed attempts the account/IP is locked for 15 minutes →
+`429 {"error": "Too many failed attempts. Try again later.", "code": "RATE_LIMITED"}` —
+show a "try again later" message, don't retry automatically.
+
+**Cache** `token`, `user_ref`, and `default_home_id`. Use `user_ref` and
+`default_home_id` everywhere the examples below say `scott_mobile` /
+`scott_home`. `user_id` and `email` are included so the app can attach the
+user's identity to feedback reports.
+
+### Startup flow
+
+1. No stored token → show login screen → `POST /auth/login` → store `token`.
+2. Have a token → `GET /me` to refresh identity:
+
+```bash
+curl -s "$BASE/me" -H "Authorization: Bearer $TOKEN"
+```
+
+Returns the same identity payload (minus the token fields). `401` means the
+token expired → re-login.
+
+### Using the token on every other endpoint
+
+The login token works as the bearer on **all** endpoints below — same
+header shape as the platform key:
+
+```
+Authorization: Bearer <token>
+```
+
+Two differences vs the static platform key:
+
+- the server knows who you are: sending a `user_ref` (query or body) that
+  doesn't match the logged-in user, or a `home_id` the user doesn't own,
+  → `403 FORBIDDEN`;
+- `GET /me` only works with a login token (platform keys carry no identity).
+
+> **Transition:** the static platform keys (`sk_ios_…` etc.) continue to
+> work exactly as before — existing builds are unaffected. New app builds
+> should move to the login flow; the static keys will be retired after that.
+
+---
+
 ## 3. Endpoint Reference
 
 The API has six feature groups:

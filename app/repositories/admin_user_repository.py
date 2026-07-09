@@ -61,16 +61,33 @@ class AdminUserRepository:
             }
         ]
 
+        import os
+        import logging
+        overridden = 0
         for admin_data in default_admins:
+            # ADMIN_PASSWORD_<USERNAME> env var overrides the default password
+            # (the defaults are committed to git, so treat them as public).
+            env_password = os.environ.get(
+                f"ADMIN_PASSWORD_{admin_data['username'].upper()}", ""
+            ).strip()
+            if env_password:
+                overridden += 1
             admin = AdminUser(
                 username=admin_data['username'],
-                password_hash=AdminUser.hash_password(admin_data['password']),
+                password_hash=AdminUser.hash_password(env_password or admin_data['password']),
                 full_name=admin_data['full_name'],
                 email=admin_data['email'],
                 is_active=True,
                 created_at=datetime.now()
             )
             self._users[admin.username] = admin
+
+        if overridden < len(default_admins):
+            logging.getLogger(__name__).warning(
+                "⚠ %d admin account(s) are using DEFAULT passwords committed to "
+                "git. Override each with ADMIN_PASSWORD_<USERNAME> env vars.",
+                len(default_admins) - overridden,
+            )
 
     def get_by_username(self, username: str) -> Optional[AdminUser]:
         """

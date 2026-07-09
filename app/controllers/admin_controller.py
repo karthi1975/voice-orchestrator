@@ -104,6 +104,12 @@ class AdminController(BaseController):
             self.delete_user,
             methods=['DELETE']
         )
+        self.blueprint.add_url_rule(
+            '/users/<user_id>/password',
+            'set_user_password',
+            self.set_user_password,
+            methods=['PUT']
+        )
 
         # Home endpoints
         self.blueprint.add_url_rule(
@@ -252,7 +258,9 @@ class AdminController(BaseController):
             user = self._user_service.create_user(
                 username=req.username,
                 full_name=req.full_name,
-                email=req.email
+                email=req.email,
+                user_id=req.user_id,
+                password=req.password
             )
 
             response = UserResponse.from_model(user)
@@ -340,6 +348,36 @@ class AdminController(BaseController):
 
         except ValueError as e:
             logger.warning(f"Failed to update user {user_id}: {str(e)}")
+            return self.error_response(str(e), 404)
+
+    def set_user_password(self, user_id: str) -> Tuple[Any, int]:
+        """
+        PUT /admin/users/{user_id}/password - Set or reset mobile-login password.
+
+        Request body:
+            {
+                "password": "new-password"
+            }
+
+        Returns:
+            200: Password set
+            400: Validation error
+            404: User not found
+        """
+        self.log_request(f'set_user_password:{user_id}')
+
+        try:
+            data = self.get_request_json()
+            password = (data.get('password') or '').strip()
+            if not password:
+                return self.error_response("password cannot be empty", 400)
+
+            self._user_service.set_password(user_id, password)
+            logger.info(f"Password set for user: {user_id}")
+            return self.json_response({"user_id": user_id, "password_set": True}, 200)
+
+        except ValueError as e:
+            logger.warning(f"Failed to set password for {user_id}: {str(e)}")
             return self.error_response(str(e), 404)
 
     def delete_user(self, user_id: str) -> Tuple[Any, int]:

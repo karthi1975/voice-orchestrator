@@ -291,6 +291,11 @@ class DependencyContainer:
             scene_mapping_service=self.scene_mapping_service
         )
 
+        # Guard /admin/*: admin session or ADMIN_API_TOKEN bearer required
+        # (ADMIN_AUTH_OPEN=true restores the old open behavior for local dev).
+        from app.middleware.admin_auth import attach_admin_auth
+        attach_admin_auth(self.admin_controller.blueprint)
+
         # Auth controller for admin login/logout
         self.auth_controller = AuthController(
             admin_auth_service=self.admin_auth_service

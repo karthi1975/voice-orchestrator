@@ -24,16 +24,18 @@ On failure:
 If no keys are configured at all, the middleware falls OPEN (allows all)
 and logs a prominent warning — fine for local dev, bad for prod.
 
-Tier 2 will replace this with JWT-signed `sub=user_ref` claims; the
-header shape (`Authorization: Bearer ...`) stays the same, so mobile
-clients never change their request code.
+Tier 2 (implemented): pass a `token_verifier` to also accept JWT login
+tokens (from POST /auth/login). A JWT bearer sets g.user_ref from the
+token's `sub` claim; static platform keys keep working unchanged, so
+existing app builds are undisturbed. The header shape
+(`Authorization: Bearer ...`) is identical for both.
 """
 
 import hmac
 import json
 import logging
 import os
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 from flask import Blueprint, Response, g, jsonify, request
 
@@ -78,10 +80,60 @@ def _match_key(presented: str, keys: Dict[str, str]) -> Optional[str]:
     return matched
 
 
-def attach_mobile_api_key_auth(blueprint: Blueprint) -> None:
+def _request_values(field: str) -> list:
+    """Collect a field's values from query string, form body, and JSON body."""
+    values = []
+    values.extend(request.args.getlist(field))
+    if request.mimetype == "application/x-www-form-urlencoded" or request.form:
+        values.extend(request.form.getlist(field))
+    body = request.get_json(silent=True)
+    if isinstance(body, dict) and field in body:
+        values.append(body.get(field))
+    return values
+
+
+def _find_user_ref_mismatch(token_user: str) -> Optional[str]:
+    """If the request carries a user_ref that differs from the token's user,
+    return the offending value; otherwise None.
+
+    Only enforced for JWT callers — static-key callers are legacy-trusted and
+    keep today's behavior. Guards query string, form body, and JSON body.
+    """
+    for supplied in _request_values("user_ref"):
+        if isinstance(supplied, str) and supplied.strip() and supplied.strip() != token_user:
+            return supplied.strip()
+    return None
+
+
+def _find_foreign_home(token_user: str,
+                       is_home_owner: Callable[[str, str], bool]) -> Optional[str]:
+    """If the request names a home_id the token's user does not own, return
+    it; otherwise None. JWT callers only — same rationale as user_ref."""
+    for supplied in _request_values("home_id"):
+        if isinstance(supplied, str) and supplied.strip():
+            home_id = supplied.strip()
+            if not is_home_owner(token_user, home_id):
+                return home_id
+    return None
+
+
+def attach_mobile_api_key_auth(
+    blueprint: Blueprint,
+    token_verifier: Optional[Callable[[str], Optional[str]]] = None,
+    is_home_owner: Optional[Callable[[str, str], bool]] = None,
+) -> None:
     """Wire the Bearer-key check onto the given blueprint's before_request hook.
 
     Call this once, after routes are registered on the blueprint.
+
+    Args:
+        token_verifier: optional callable(token) -> user_id | None. When
+            provided, a bearer that verifies as a JWT login token is accepted
+            and g.user_ref is set from it. Static keys are checked afterwards
+            exactly as before, so omitting this keeps the old behavior.
+        is_home_owner: optional callable(user_id, home_id) -> bool. When
+            provided, JWT callers naming a home_id they do not own get 403.
+            Static-key callers are never affected.
     """
     keys = _load_keys()
 
@@ -114,6 +166,37 @@ def attach_mobile_api_key_auth(blueprint: Blueprint) -> None:
         presented = auth_hdr[7:].strip()
         if not presented:
             return jsonify({"error": "Empty bearer token", "code": "UNAUTHORIZED"}), 401
+
+        # Tier 2: accept a JWT login token as an alternative to the static
+        # platform keys. Checked first (cheap, signature-based); on failure we
+        # fall through to the static-key path so old app builds are unaffected.
+        if token_verifier is not None and presented.count(".") == 2:
+            token_user = token_verifier(presented)
+            if token_user is not None:
+                mismatch = _find_user_ref_mismatch(token_user)
+                if mismatch is not None:
+                    logger.warning(
+                        f"voice_auth 403 user_ref mismatch token={token_user!r} "
+                        f"request={mismatch!r} path={request.path}"
+                    )
+                    return jsonify({
+                        "error": "user_ref does not match the authenticated user",
+                        "code": "FORBIDDEN",
+                    }), 403
+                if is_home_owner is not None:
+                    foreign = _find_foreign_home(token_user, is_home_owner)
+                    if foreign is not None:
+                        logger.warning(
+                            f"voice_auth 403 foreign home user={token_user!r} "
+                            f"home={foreign!r} path={request.path}"
+                        )
+                        return jsonify({
+                            "error": f"home '{foreign}' does not belong to the authenticated user",
+                            "code": "FORBIDDEN",
+                        }), 403
+                g.mobile_platform = "jwt"
+                g.user_ref = token_user
+                return None
 
         label = _match_key(presented, keys)
         if label is None:

@@ -39,7 +39,9 @@ class UserService:
         self,
         username: str,
         full_name: str,
-        email: Optional[str] = None
+        email: Optional[str] = None,
+        user_id: Optional[str] = None,
+        password: Optional[str] = None
     ) -> User:
         """
         Create a new user.
@@ -48,6 +50,11 @@ class UserService:
             username: Unique username
             full_name: User's full name
             email: Optional email address
+            user_id: Optional explicit user ID (defaults to a new UUID).
+                     Used to align user_id with an existing mobile user_ref
+                     (e.g. "scott_mobile") so historical data stays attached.
+            password: Optional plain-text password; when set, enables mobile
+                      app login for this user.
 
         Returns:
             Created user
@@ -55,8 +62,11 @@ class UserService:
         Raises:
             ValueError: If username or email already exists
         """
-        # Generate unique user ID
-        user_id = str(uuid.uuid4())
+        if password is not None:
+            self._validate_password(password)
+
+        # Explicit ID (mobile user_ref alignment) or generated UUID
+        user_id = (user_id or "").strip() or str(uuid.uuid4())
 
         # Create user domain model
         user = User(
@@ -65,11 +75,42 @@ class UserService:
             full_name=full_name,
             email=email,
             is_active=True,
-            created_at=datetime.now()
+            created_at=datetime.now(),
+            password_hash=User.hash_password(password) if password else None
         )
 
         # Persist to repository
         return self._repository.add(user)
+
+    def set_password(self, user_id: str, password: str) -> User:
+        """
+        Set or reset a user's mobile-login password.
+
+        Args:
+            user_id: User ID
+            password: New plain-text password
+
+        Returns:
+            Updated user
+
+        Raises:
+            ValueError: If user not found or password too weak
+        """
+        self._validate_password(password)
+
+        user = self.get_user(user_id)
+        user.password_hash = User.hash_password(password)
+        return self._repository.update(user)
+
+    @staticmethod
+    def _validate_password(password: str) -> None:
+        """Minimal password policy for mobile login."""
+        if not isinstance(password, str) or not password.strip():
+            raise ValueError("password cannot be empty")
+        if len(password) < 8:
+            raise ValueError("password must be at least 8 characters")
+        if len(password) > 256:
+            raise ValueError("password must be at most 256 characters")
 
     def get_user(self, user_id: str) -> User:
         """
@@ -175,7 +216,8 @@ class UserService:
                 full_name=full_name if full_name is not None else user.full_name,
                 email=email if email is not None else user.email,
                 is_active=user.is_active,
-                created_at=user.created_at
+                created_at=user.created_at,
+                password_hash=user.password_hash
             )
         elif full_name is not None or email is not None:
             user = User(
@@ -184,7 +226,8 @@ class UserService:
                 full_name=full_name if full_name is not None else user.full_name,
                 email=email if email is not None else user.email,
                 is_active=user.is_active,
-                created_at=user.created_at
+                created_at=user.created_at,
+                password_hash=user.password_hash
             )
 
         return self._repository.update(user)

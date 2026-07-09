@@ -92,6 +92,7 @@ class User:
         full_name: User's full name
         is_active: Whether the user account is active
         created_at: When the user was created
+        password_hash: Hashed login password for mobile app login (None = login disabled)
     """
     user_id: str
     username: str
@@ -99,6 +100,20 @@ class User:
     is_active: bool = True
     created_at: datetime = field(default_factory=datetime.now)
     email: Optional[str] = None
+    password_hash: Optional[str] = None
+
+    def check_password(self, password: str) -> bool:
+        """Verify a plain-text password against the stored hash."""
+        if not self.password_hash:
+            return False
+        from werkzeug.security import check_password_hash
+        return check_password_hash(self.password_hash, password)
+
+    @staticmethod
+    def hash_password(password: str) -> str:
+        """Hash a plain-text password (pbkdf2:sha256, same scheme as AdminUser)."""
+        from werkzeug.security import generate_password_hash
+        return generate_password_hash(password, method='pbkdf2:sha256')
 
 
 @dataclass

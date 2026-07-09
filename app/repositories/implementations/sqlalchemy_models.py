@@ -34,6 +34,9 @@ class UserModel(Base):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    # Nullable: existing users keep working, they just can't log in until a
+    # password is provisioned (admin endpoint or scripts/provision_mobile_login.py).
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     def __repr__(self) -> str:
         """String representation."""
