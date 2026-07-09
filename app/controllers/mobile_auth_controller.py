@@ -16,7 +16,9 @@ from typing import Any, Tuple
 
 from flask import Blueprint, jsonify, request
 
-from app.services.mobile_auth_service import MobileAuthService, RateLimitedError
+from app.services.mobile_auth_service import (MobileAuthService,
+                                              PendingApprovalError,
+                                              RateLimitedError)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,7 @@ class MobileAuthController:
         self._register_routes()
 
     def _register_routes(self) -> None:
+        self.blueprint.add_url_rule("/auth/signup", "mobile_signup", self.signup, methods=["POST"])
         self.blueprint.add_url_rule("/auth/login", "mobile_login", self.login, methods=["POST"])
         self.blueprint.add_url_rule("/auth/change-password", "mobile_change_password",
                                     self.change_password, methods=["POST"])
@@ -38,6 +41,47 @@ class MobileAuthController:
     def _bearer(self) -> str:
         hdr = request.headers.get("Authorization", "")
         return hdr[7:].strip() if hdr.lower().startswith("bearer ") else ""
+
+    def signup(self) -> Tuple[Any, int]:
+        """POST /auth/signup {"email": "...", "password": "...", "full_name": "..."}
+
+        Creates a PENDING account (Tier 2: admin approval). The user cannot
+        log in until an admin activates the account and attaches their home.
+
+        201: {"status": "pending_approval", "email": "...", "message": "..."}
+        400 VALIDATION / 409 EMAIL_EXISTS / 429 RATE_LIMITED
+        """
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "JSON body required", "code": "VALIDATION"}), 400
+
+        try:
+            user = self._svc.signup(
+                email=body.get("email"),
+                password=body.get("password"),
+                full_name=body.get("full_name"),
+                client_ip=request.remote_addr,
+            )
+        except RateLimitedError:
+            logger.warning(f"signup rate-limited ip={request.remote_addr}")
+            return jsonify({
+                "error": "Too many signups from this address. Try again later.",
+                "code": "RATE_LIMITED",
+            }), 429
+        except ValueError as e:
+            if "already exists" in str(e).lower():
+                return jsonify({
+                    "error": "An account with this email already exists. Try logging in.",
+                    "code": "EMAIL_EXISTS",
+                }), 409
+            return jsonify({"error": str(e), "code": "VALIDATION"}), 400
+
+        return jsonify({
+            "status": "pending_approval",
+            "email": user.email,
+            "message": "Account created. HomeAdapt will contact you to complete "
+                       "your home setup — you can log in once it's activated.",
+        }), 201
 
     def login(self) -> Tuple[Any, int]:
         """POST /auth/login {"email": "...", "password": "..."}
@@ -69,6 +113,12 @@ class MobileAuthController:
 
         try:
             user = self._svc.login(identifier, password, client_ip=request.remote_addr)
+        except PendingApprovalError:
+            return jsonify({
+                "error": "Your account is awaiting activation. HomeAdapt will "
+                         "contact you to complete setup.",
+                "code": "PENDING_APPROVAL",
+            }), 403
         except RateLimitedError:
             logger.warning(
                 f"mobile login rate-limited identifier={identifier!r} ip={request.remote_addr}"

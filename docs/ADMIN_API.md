@@ -80,6 +80,25 @@ curl -X POST http://localhost:6500/admin/users \
 
 ---
 
+### List Pending Signups
+
+Mobile sign-ups awaiting activation (`POST /auth/signup` creates them inactive).
+
+**Endpoint:** `GET /admin/users/pending`
+
+**Response:** `200 OK` — `{"users": [...], "count": n}`
+
+---
+
+### Activate a Pending Signup
+
+**Endpoint:** `POST /admin/users/{user_id}/activate`
+
+After activating, attach the user's home (`POST /admin/homes` or
+`scripts/provision_mobile_login.py --home <home_id>`) so `GET /me` returns it.
+
+---
+
 ### Set / Reset User Password
 
 Set or reset a user's mobile-login password (8–256 chars).

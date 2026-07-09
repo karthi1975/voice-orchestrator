@@ -110,6 +110,18 @@ class AdminController(BaseController):
             self.set_user_password,
             methods=['PUT']
         )
+        self.blueprint.add_url_rule(
+            '/users/pending',
+            'list_pending_users',
+            self.list_pending_users,
+            methods=['GET']
+        )
+        self.blueprint.add_url_rule(
+            '/users/<user_id>/activate',
+            'activate_user',
+            self.activate_user,
+            methods=['POST']
+        )
 
         # Home endpoints
         self.blueprint.add_url_rule(
@@ -378,6 +390,41 @@ class AdminController(BaseController):
 
         except ValueError as e:
             logger.warning(f"Failed to set password for {user_id}: {str(e)}")
+            return self.error_response(str(e), 404)
+
+    def list_pending_users(self) -> Tuple[Any, int]:
+        """
+        GET /admin/users/pending - List signups awaiting activation.
+
+        Returns:
+            200: {"users": [...], "count": n}
+        """
+        self.log_request('list_pending_users')
+
+        pending = [u for u in self._user_service.list_users() if not u.is_active]
+        users = [UserResponse.from_model(u).to_dict() for u in pending]
+        return self.json_response({"users": users, "count": len(users)}, 200)
+
+    def activate_user(self, user_id: str) -> Tuple[Any, int]:
+        """
+        POST /admin/users/{user_id}/activate - Activate a pending signup.
+
+        After activating, attach the user's home via POST /admin/homes
+        (or scripts/provision_mobile_login.py --home) so GET /me returns it.
+
+        Returns:
+            200: User activated
+            404: User not found
+        """
+        self.log_request(f'activate_user:{user_id}')
+
+        try:
+            user = self._user_service.activate_user(user_id)
+            response = UserResponse.from_model(user)
+            logger.info(f"User activated: {user_id}")
+            return self.json_response(response.to_dict(), 200)
+
+        except ValueError as e:
             return self.error_response(str(e), 404)
 
     def delete_user(self, user_id: str) -> Tuple[Any, int]:

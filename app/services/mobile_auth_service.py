@@ -55,6 +55,10 @@ class RateLimitedError(Exception):
     """Too many failed login attempts; try again later."""
 
 
+class PendingApprovalError(Exception):
+    """Credentials are correct but the account has not been activated yet."""
+
+
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
@@ -176,12 +180,62 @@ class MobileAuthService:
             self._throttle.record_failure(*throttle_keys)
             return None
         if not user.is_active:
-            logger.warning(f"mobile login rejected (inactive): {user.user_id}")
-            self._throttle.record_failure(*throttle_keys)
-            return None
+            # Password is correct, so telling them the account is pending
+            # reveals nothing an attacker could use for enumeration.
+            logger.info(f"mobile login pending activation: {user.user_id}")
+            self._throttle.record_success(*throttle_keys)
+            raise PendingApprovalError()
 
         self._throttle.record_success(*throttle_keys)
         return user
+
+    # ---- Sign-up (Tier 2: admin approval) --------------------------------
+
+    def signup(self, email: str, password: str, full_name: str,
+               client_ip: Optional[str] = None) -> User:
+        """Create a PENDING account (is_active=False).
+
+        The account cannot log in until an admin activates it and attaches a
+        home — that keeps who-becomes-a-customer under admin control and
+        makes unverified-email registrations harmless.
+
+        Raises:
+            ValueError: invalid email/name/password, or email already registered.
+            RateLimitedError: too many signups from this IP (5 per 15 min).
+        """
+        if not isinstance(email, str) or not isinstance(password, str) \
+                or not isinstance(full_name, str):
+            raise ValueError("email, password and full_name are required")
+        email = email.strip().lower()
+        full_name = full_name.strip()
+        if not email or "@" not in email or len(email) > 255:
+            raise ValueError("a valid email is required")
+        if not full_name or len(full_name) > 255:
+            raise ValueError("full_name is required")
+        if len(password) < 8 or len(password) > 256:
+            raise ValueError("password must be 8-256 characters")
+
+        ip_key = f"signup:{client_ip}" if client_ip else ""
+        if ip_key and self._throttle.is_locked(ip_key):
+            raise RateLimitedError()
+        if ip_key:
+            # Counts every attempt: caps signups per IP at the throttle limit.
+            self._throttle.record_failure(ip_key)
+
+        import uuid
+        from datetime import datetime
+        user = User(
+            user_id=str(uuid.uuid4()),
+            username=email,
+            full_name=full_name,
+            email=email,
+            is_active=False,
+            created_at=datetime.now(),
+            password_hash=User.hash_password(password),
+        )
+        created = self._users.add(user)  # raises ValueError on duplicate email
+        logger.info(f"signup pending user={created.user_id} email={email}")
+        return created
 
     def get_user(self, user_id: str) -> Optional[User]:
         return self._users.get_by_id(user_id)

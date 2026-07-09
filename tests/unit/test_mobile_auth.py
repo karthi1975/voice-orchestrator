@@ -115,10 +115,18 @@ class TestLogin:
         users.add(User(user_id="u2", username="nopw", full_name="No PW"))
         assert service.login("nopw", "anything") is None
 
-    def test_inactive_user(self, repos, service):
+    def test_inactive_user_pending(self, repos, service):
+        from app.services.mobile_auth_service import PendingApprovalError
         users, _ = repos
         users.deactivate("scott_mobile")
-        assert service.login("scott", "hunter2") is None
+        with pytest.raises(PendingApprovalError):
+            service.login("scott", "hunter2")
+
+    def test_inactive_wrong_password_stays_generic(self, repos, service):
+        # Wrong password on an inactive account must NOT reveal pending state.
+        users, _ = repos
+        users.deactivate("scott_mobile")
+        assert service.login("scott", "wrong-pass") is None
 
 
 # --- Endpoints ---
@@ -164,6 +172,78 @@ class TestEndpoints:
         rv = client.get("/api/v1/voice-auth/me",
                         headers={"Authorization": "Bearer sk_ios_abc"})
         assert rv.status_code == 401
+
+
+# --- Sign-up (Tier 2: admin approval) ---
+
+class TestSignup:
+    def test_signup_creates_pending_account(self, client, repos):
+        users, _ = repos
+        rv = client.post("/api/v1/voice-auth/auth/signup",
+                         json={"email": "New.User@Example.com",
+                               "password": "goodpass99", "full_name": "New User"})
+        assert rv.status_code == 201
+        body = rv.get_json()
+        assert body["status"] == "pending_approval"
+        assert body["email"] == "new.user@example.com"  # normalized
+        user = users.get_by_email("new.user@example.com")
+        assert user is not None and user.is_active is False
+
+    def test_pending_account_cannot_login_403(self, client):
+        client.post("/api/v1/voice-auth/auth/signup",
+                    json={"email": "p@x.com", "password": "goodpass99",
+                          "full_name": "P"})
+        rv = client.post("/api/v1/voice-auth/auth/login",
+                         json={"email": "p@x.com", "password": "goodpass99"})
+        assert rv.status_code == 403
+        assert rv.get_json()["code"] == "PENDING_APPROVAL"
+
+    def test_activated_account_can_login(self, client, repos):
+        users, _ = repos
+        client.post("/api/v1/voice-auth/auth/signup",
+                    json={"email": "a@x.com", "password": "goodpass99",
+                          "full_name": "A"})
+        users.activate(users.get_by_email("a@x.com").user_id)
+        rv = client.post("/api/v1/voice-auth/auth/login",
+                         json={"email": "a@x.com", "password": "goodpass99"})
+        assert rv.status_code == 200
+        body = rv.get_json()
+        assert body["homes"] == [] and body["default_home_id"] is None
+
+    def test_duplicate_email_409(self, client):
+        rv = client.post("/api/v1/voice-auth/auth/signup",
+                         json={"email": "scott@example.com",
+                               "password": "goodpass99", "full_name": "Imposter"})
+        assert rv.status_code == 409
+        assert rv.get_json()["code"] == "EMAIL_EXISTS"
+
+    def test_validation_errors_400(self, client):
+        for payload in (
+            {"email": "not-an-email", "password": "goodpass99", "full_name": "X"},
+            {"email": "v@x.com", "password": "short", "full_name": "X"},
+            {"email": "v@x.com", "password": "goodpass99", "full_name": ""},
+            {"email": 42, "password": "goodpass99", "full_name": "X"},
+        ):
+            rv = client.post("/api/v1/voice-auth/auth/signup", json=payload)
+            assert rv.status_code == 400, payload
+
+    def test_signup_rate_limited_per_ip(self, client):
+        for i in range(5):
+            client.post("/api/v1/voice-auth/auth/signup",
+                        json={"email": f"u{i}@x.com", "password": "goodpass99",
+                              "full_name": "U"})
+        rv = client.post("/api/v1/voice-auth/auth/signup",
+                         json={"email": "u6@x.com", "password": "goodpass99",
+                               "full_name": "U"})
+        assert rv.status_code == 429
+
+    def test_wrong_password_on_pending_is_generic_401(self, client):
+        client.post("/api/v1/voice-auth/auth/signup",
+                    json={"email": "q@x.com", "password": "goodpass99",
+                          "full_name": "Q"})
+        rv = client.post("/api/v1/voice-auth/auth/login",
+                         json={"email": "q@x.com", "password": "wrong-pass"})
+        assert rv.status_code == 401  # no pending-state leak without the password
 
 
 # --- Change password ---

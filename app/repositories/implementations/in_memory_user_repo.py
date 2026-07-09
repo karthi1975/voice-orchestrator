@@ -5,6 +5,7 @@ Thread-safe in-memory storage for User entities.
 Suitable for development and single-instance deployments.
 """
 
+import dataclasses
 from datetime import datetime
 from typing import Optional, List, Dict
 from threading import Lock
@@ -153,16 +154,8 @@ class InMemoryUserRepository(IUserRepository):
             if not user:
                 return False
 
-            # Create updated user with is_active=False
-            updated_user = User(
-                user_id=user.user_id,
-                username=user.username,
-                full_name=user.full_name,
-                email=user.email,
-                is_active=False,
-                created_at=user.created_at
-            )
-            self._storage[user_id] = updated_user
+            # replace() keeps every other field (incl. password_hash) intact
+            self._storage[user_id] = dataclasses.replace(user, is_active=False)
             return True
 
     def activate(self, user_id: str) -> bool:
@@ -172,14 +165,5 @@ class InMemoryUserRepository(IUserRepository):
             if not user:
                 return False
 
-            # Create updated user with is_active=True
-            updated_user = User(
-                user_id=user.user_id,
-                username=user.username,
-                full_name=user.full_name,
-                email=user.email,
-                is_active=True,
-                created_at=user.created_at
-            )
-            self._storage[user_id] = updated_user
+            self._storage[user_id] = dataclasses.replace(user, is_active=True)
             return True

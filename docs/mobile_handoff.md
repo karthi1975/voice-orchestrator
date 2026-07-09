@@ -48,6 +48,25 @@ Until now the examples hardcoded `user_ref: "scott_mobile"` and
 `home_id: "scott_home"`. Those values are now discoverable per user — the
 app should fetch and cache them on startup instead.
 
+### Sign-up (new accounts)
+
+```bash
+curl -s -X POST "$BASE/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "new@example.com", "password": "min-8-chars", "full_name": "New User"}'
+```
+
+`201` → `{"status": "pending_approval", "email": "...", "message": "..."}`.
+Accounts start **pending**: the user cannot log in until HomeAdapt activates
+the account and attaches their home (admin approval — keeps onboarding under
+our control). Show the returned `message` and route back to the login screen.
+
+Errors: `409 EMAIL_EXISTS` (offer login instead), `400 VALIDATION`,
+`429 RATE_LIMITED` (5 signups/15 min per IP).
+
+Logging in before activation (correct password) → `403 PENDING_APPROVAL` —
+show "your account is awaiting activation."
+
 ### Login
 
 ```bash
