@@ -166,6 +166,65 @@ class TestEndpoints:
         assert rv.status_code == 401
 
 
+# --- Change password ---
+
+class TestChangePassword:
+    def _token(self, client):
+        return client.post("/api/v1/voice-auth/auth/login",
+                           json={"email": "scott@example.com", "password": "hunter2"}
+                           ).get_json()["token"]
+
+    def test_success_and_old_password_invalidated(self, client, service):
+        token = self._token(client)
+        rv = client.post("/api/v1/voice-auth/auth/change-password",
+                         headers={"Authorization": f"Bearer {token}"},
+                         json={"current_password": "hunter2", "new_password": "brandnew99"})
+        assert rv.status_code == 204
+        assert service.login("scott", "hunter2") is None
+        assert service.login("scott", "brandnew99") is not None
+        # existing token still valid until expiry
+        rv = client.get("/api/v1/voice-auth/me",
+                        headers={"Authorization": f"Bearer {token}"})
+        assert rv.status_code == 200
+
+    def test_wrong_current_password_403(self, client):
+        token = self._token(client)
+        rv = client.post("/api/v1/voice-auth/auth/change-password",
+                         headers={"Authorization": f"Bearer {token}"},
+                         json={"current_password": "wrong", "new_password": "brandnew99"})
+        assert rv.status_code == 403
+
+    def test_weak_new_password_400(self, client):
+        token = self._token(client)
+        rv = client.post("/api/v1/voice-auth/auth/change-password",
+                         headers={"Authorization": f"Bearer {token}"},
+                         json={"current_password": "hunter2", "new_password": "short"})
+        assert rv.status_code == 400
+
+    def test_no_token_401(self, client):
+        rv = client.post("/api/v1/voice-auth/auth/change-password",
+                         json={"current_password": "hunter2", "new_password": "brandnew99"})
+        assert rv.status_code == 401
+
+    def test_non_string_values_400(self, client):
+        token = self._token(client)
+        rv = client.post("/api/v1/voice-auth/auth/change-password",
+                         headers={"Authorization": f"Bearer {token}"},
+                         json={"current_password": 1, "new_password": ["x"]})
+        assert rv.status_code == 400
+
+    def test_rate_limited_after_failures(self, client):
+        token = self._token(client)
+        for _ in range(5):
+            client.post("/api/v1/voice-auth/auth/change-password",
+                        headers={"Authorization": f"Bearer {token}"},
+                        json={"current_password": "wrong", "new_password": "brandnew99"})
+        rv = client.post("/api/v1/voice-auth/auth/change-password",
+                         headers={"Authorization": f"Bearer {token}"},
+                         json={"current_password": "hunter2", "new_password": "brandnew99"})
+        assert rv.status_code == 429
+
+
 # --- Middleware: JWT + static keys side by side ---
 
 @pytest.fixture

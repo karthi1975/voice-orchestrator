@@ -96,6 +96,21 @@ curl -s "$BASE/me" -H "Authorization: Bearer $TOKEN"
 Returns the same identity payload (minus the token fields). `401` means the
 token expired → re-login.
 
+### Change password
+
+```bash
+curl -s -X POST "$BASE/auth/change-password" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"current_password": "old-one", "new_password": "new-one-min-8-chars"}'
+```
+
+`204` on success (no body). The current token stays valid until it expires —
+no forced re-login. Errors: `403 FORBIDDEN` wrong current password,
+`400 VALIDATION` new password outside 8–256 chars, `429 RATE_LIMITED` after
+5 wrong current-password attempts (15-min lock), `401` missing/expired token.
+Forgotten passwords are reset by the admin (`PUT /admin/users/{id}/password`).
+
 ### Using the token on every other endpoint
 
 The login token works as the bearer on **all** endpoints below — same

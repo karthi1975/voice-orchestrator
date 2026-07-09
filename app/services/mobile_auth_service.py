@@ -186,6 +186,44 @@ class MobileAuthService:
     def get_user(self, user_id: str) -> Optional[User]:
         return self._users.get_by_id(user_id)
 
+    def change_password(self, user_id: str, current_password: str,
+                        new_password: str) -> bool:
+        """Change a user's password after verifying the current one.
+
+        Requiring the current password means a stolen (still-valid) token
+        alone can't silently lock the real user out.
+
+        Returns False when the current password is wrong or the user is
+        missing/inactive.
+
+        Raises:
+            ValueError: new password fails the 8-256 char policy.
+            RateLimitedError: too many wrong current-password attempts.
+        """
+        if not isinstance(current_password, str) or not isinstance(new_password, str):
+            return False
+        if len(current_password) > MAX_CREDENTIAL_LENGTH:
+            return False
+        if len(new_password) < 8 or len(new_password) > 256:
+            raise ValueError("new password must be 8-256 characters")
+
+        throttle_key = f"pw:{user_id}"
+        if self._throttle.is_locked(throttle_key):
+            raise RateLimitedError()
+
+        user = self._users.get_by_id(user_id)
+        if user is None or not user.is_active:
+            return False
+        if not user.check_password(current_password):
+            self._throttle.record_failure(throttle_key)
+            return False
+
+        user.password_hash = User.hash_password(new_password)
+        self._users.update(user)
+        self._throttle.record_success(throttle_key)
+        logger.info(f"password changed user={user_id}")
+        return True
+
     def bootstrap(self, user: User) -> Dict[str, Any]:
         """The identity payload the app caches on startup.
 

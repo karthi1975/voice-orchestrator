@@ -31,6 +31,8 @@ class MobileAuthController:
 
     def _register_routes(self) -> None:
         self.blueprint.add_url_rule("/auth/login", "mobile_login", self.login, methods=["POST"])
+        self.blueprint.add_url_rule("/auth/change-password", "mobile_change_password",
+                                    self.change_password, methods=["POST"])
         self.blueprint.add_url_rule("/me", "mobile_me", self.me, methods=["GET"])
 
     def _bearer(self) -> str:
@@ -92,6 +94,53 @@ class MobileAuthController:
         }
         logger.info(f"mobile login ok user={user.user_id}")
         return jsonify(payload), 200
+
+    def change_password(self) -> Tuple[Any, int]:
+        """POST /auth/change-password (JWT required)
+
+            {"current_password": "...", "new_password": "..."}
+
+        Verifies the current password before applying the new one.
+        204 on success; existing tokens keep working until they expire.
+        """
+        token = self._bearer()
+        user_id = self._svc.verify_token(token) if token else None
+        if user_id is None:
+            return jsonify({
+                "error": "Valid login token required. POST /auth/login first.",
+                "code": "UNAUTHORIZED",
+            }), 401
+
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "JSON body required", "code": "VALIDATION"}), 400
+        current = body.get("current_password")
+        new = body.get("new_password")
+        if not isinstance(current, str) or not isinstance(new, str) or not current or not new:
+            return jsonify({
+                "error": "current_password and new_password are required",
+                "code": "VALIDATION",
+            }), 400
+
+        try:
+            ok = self._svc.change_password(user_id, current, new)
+        except ValueError as e:
+            return jsonify({"error": str(e), "code": "VALIDATION"}), 400
+        except RateLimitedError:
+            logger.warning(f"change-password rate-limited user={user_id}")
+            return jsonify({
+                "error": "Too many failed attempts. Try again later.",
+                "code": "RATE_LIMITED",
+            }), 429
+
+        if not ok:
+            logger.warning(f"change-password wrong current password user={user_id}")
+            return jsonify({
+                "error": "Current password is incorrect",
+                "code": "FORBIDDEN",
+            }), 403
+
+        return "", 204
 
     def me(self) -> Tuple[Any, int]:
         """GET /me — resolve the caller's user_ref/home_id from their JWT.
