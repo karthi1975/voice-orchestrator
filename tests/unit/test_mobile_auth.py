@@ -72,7 +72,8 @@ class TestToken:
     def test_tampered_signature_rejected(self, service):
         token = service.issue_token("scott_mobile")["token"]
         head, payload, sig = token.split(".")
-        bad = f"{head}.{payload}.{'A' + sig[1:]}"
+        flipped = ("B" if sig[0] == "A" else "A") + sig[1:]  # guaranteed change
+        bad = f"{head}.{payload}.{flipped}"
         assert service.verify_token(bad) is None
 
     def test_wrong_secret_rejected(self, repos, service):

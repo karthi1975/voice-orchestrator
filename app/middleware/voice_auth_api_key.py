@@ -151,19 +151,22 @@ def attach_mobile_api_key_auth(
         if request.method == "OPTIONS":
             return None
 
-        # If no keys configured, fall open (dev/local).
-        if not keys:
+        auth_hdr = request.headers.get("Authorization", "")
+        has_bearer = auth_hdr.lower().startswith("bearer ")
+        presented = auth_hdr[7:].strip() if has_bearer else ""
+
+        # If no keys configured, fall open (dev/local) — but still verify a
+        # presented JWT so g.user_ref works the same as in production.
+        if not keys and not (token_verifier is not None and presented.count(".") == 2):
             g.mobile_platform = "UNAUTHENTICATED"
             return None
 
-        auth_hdr = request.headers.get("Authorization", "")
-        if not auth_hdr.lower().startswith("bearer "):
+        if not has_bearer:
             return jsonify({
                 "error": "Missing or malformed Authorization header. Expected: Bearer <key>",
                 "code": "UNAUTHORIZED",
             }), 401
 
-        presented = auth_hdr[7:].strip()
         if not presented:
             return jsonify({"error": "Empty bearer token", "code": "UNAUTHORIZED"}), 401
 
@@ -197,6 +200,12 @@ def attach_mobile_api_key_auth(
                 g.mobile_platform = "jwt"
                 g.user_ref = token_user
                 return None
+
+        # No static keys configured and the bearer wasn't a valid JWT:
+        # keep dev-mode falls-open semantics.
+        if not keys:
+            g.mobile_platform = "UNAUTHENTICATED"
+            return None
 
         label = _match_key(presented, keys)
         if label is None:

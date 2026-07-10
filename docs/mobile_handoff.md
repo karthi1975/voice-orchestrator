@@ -374,6 +374,18 @@ Response `200`:
 When `is_favorited: true`, `favorite_id` gives you the UUID needed to
 toggle off via `DELETE /favorites/{id}` — no second roundtrip needed.
 
+**One-step delete by device/entity**: `DELETE /favorites/{ref}` also accepts
+a `device_id` or `entity_id` as the ref — add `?user_ref=...&home_id=...`
+so the server knows whose favorite to remove (with a login token, `user_ref`
+is inferred; only `home_id` is needed):
+
+```bash
+curl -s -X DELETE -H "Authorization: Bearer $KEY" \
+  "$BASE/favorites/6b86cd8c539ad69b193a8ff2acbf3b4e?user_ref=scott_mobile&home_id=scott_home"
+```
+
+`204` on success; `404` if that user has no favorite matching the ref.
+
 ### 3.2.3 Add a favorite — by device OR by entity
 
 **Required fields**: `user_ref`, `home_id`, and **exactly one** of `device_id`

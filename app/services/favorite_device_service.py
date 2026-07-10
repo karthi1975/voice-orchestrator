@@ -185,6 +185,26 @@ class FavoriteDeviceService:
             logger.info(f"FAVORITE delete id={favorite_id}")
         return ok
 
+    def remove_by_device_or_entity(self, user_ref: str, home_id: str,
+                                   ref: str) -> bool:
+        """Delete a favorite by its device_id or entity_id (one-step delete).
+
+        Scoped to (user_ref, home_id) because the same device can be
+        favorited by many users — the scope pins down whose favorite dies.
+        """
+        if not user_ref or not home_id or not ref:
+            return False
+        for f in self._repo.list_for_user_home(user_ref, home_id):
+            if ref in (f.device_id, f.entity_id):
+                ok = self._repo.delete(f.id)
+                if ok:
+                    logger.info(
+                        f"FAVORITE delete id={f.id} via ref={ref} "
+                        f"user={user_ref} home={home_id}"
+                    )
+                return ok
+        return False
+
     def reorder(self, items: List[dict]) -> List[FavoriteDevice]:
         updated: List[FavoriteDevice] = []
         for entry in items:

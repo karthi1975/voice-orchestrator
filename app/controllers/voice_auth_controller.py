@@ -55,7 +55,7 @@ import json
 import logging
 from typing import Optional
 
-from flask import jsonify, request
+from flask import g, jsonify, request
 
 from app.controllers.base_controller import BaseController
 from app.domain.models import FavoriteDevice, SceneWebhookMapping
@@ -636,13 +636,40 @@ class VoiceAuthController(BaseController):
         }), 200
 
     def delete_favorite(self, favorite_id: str):
+        """DELETE /favorites/{ref} — ref may be the favorite's id, OR its
+        device_id / entity_id (one-step delete, no list lookup needed).
+
+        The device/entity form needs (user_ref, home_id) to know whose
+        favorite to remove: pass them as query params, or just user_ref is
+        inferred from a login token.
+        """
         err = self._require_favorites()
         if err:
             return err
-        ok = self._favorites.remove_favorite(favorite_id)
-        if not ok:
-            return jsonify({"error": "not found"}), 404
-        return "", 204
+
+        # 1. Exact favorite id (original behavior, unchanged)
+        if self._favorites.remove_favorite(favorite_id):
+            return "", 204
+
+        # 2. Fallback: treat the ref as a device_id / entity_id
+        user_ref = (request.args.get("user_ref") or "").strip() \
+            or (getattr(g, "user_ref", None) or "")
+        home_id = (request.args.get("home_id") or "").strip()
+        if user_ref and home_id:
+            if self._favorites.remove_by_device_or_entity(user_ref, home_id, favorite_id):
+                return "", 204
+            return jsonify({
+                "error": f"no favorite with id, device_id or entity_id "
+                         f"'{favorite_id}' for user '{user_ref}' in home '{home_id}'",
+                "code": "NOT_FOUND",
+            }), 404
+
+        return jsonify({
+            "error": f"no favorite with id '{favorite_id}'. If that is a "
+                     f"device_id or entity_id, add ?user_ref=...&home_id=... "
+                     f"to delete by device/entity in one step.",
+            "code": "NOT_FOUND",
+        }), 404
 
     def reorder_favorites(self):
         err = self._require_favorites()
