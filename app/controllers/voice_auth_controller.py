@@ -73,7 +73,10 @@ from app.services.favorite_device_service import (
 from app.services.scene_webhook_mapping_service import SceneWebhookMappingService
 from app.services.vapi_provisioning_service import VapiProvisioningService
 from app.services.voice_auth_service import VoiceAuthService
-from app.infrastructure.home_assistant.device_registry import HADeviceRegistry
+from app.infrastructure.home_assistant.device_registry import (
+    HADeviceRegistry,
+    HomeUnreachableError,
+)
 from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
 from app.infrastructure.vapi.vapi_client import VapiClientError
 
@@ -598,6 +601,8 @@ class VoiceAuthController(BaseController):
             return jsonify({"error": str(ex), "code": "VALIDATION"}), 400
         except ValueError as ex:
             return jsonify({"error": str(ex), "code": "VALIDATION"}), 400
+        except HomeUnreachableError as ex:
+            return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
         except RuntimeError as ex:
             return jsonify({"error": str(ex), "code": "DEPENDENCY_UNAVAILABLE"}), 503
 
@@ -743,7 +748,10 @@ class VoiceAuthController(BaseController):
             return jsonify({"error": "home_id query param is required", "code": "VALIDATION"}), 400
         if not self._dispatcher.has_home(home_id):
             return jsonify({"error": f"home '{home_id}' not configured", "code": "NOT_CONFIGURED"}), 404
-        devices = self._registry.list_devices(home_id)
+        try:
+            devices = self._registry.list_devices(home_id)
+        except HomeUnreachableError as ex:
+            return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
         return jsonify({
             "home_id": home_id,
             "count": len(devices),
@@ -800,7 +808,10 @@ class VoiceAuthController(BaseController):
                 fav_by_entity[f.entity_id] = f.id
 
         # 2. Pull devices and the raw HA states (for scenes/scripts/automations + orphan entities)
-        devices = self._registry.list_devices(home_id)
+        try:
+            devices = self._registry.list_devices(home_id)
+        except HomeUnreachableError as ex:
+            return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
 
         # State map for adding `state` field to results
         cfg = self._dispatcher._homes.get(home_id)

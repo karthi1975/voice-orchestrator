@@ -43,6 +43,15 @@ from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatch
 logger = logging.getLogger(__name__)
 
 
+class HomeUnreachableError(RuntimeError):
+    """Home Assistant for a home is unreachable or rejecting our credentials.
+
+    Distinct from "device not found" so API callers see the truth: a 503
+    (fix the home link) instead of a misleading 400 (fix your request).
+    Subclasses RuntimeError so existing generic handlers still catch it.
+    """
+
+
 PRIMARY_DOMAIN_PRIORITY: List[str] = [
     "light",
     "lock",
@@ -98,7 +107,18 @@ class HADeviceRegistry:
                 return cached[1]
 
         # Fetch outside the lock to avoid blocking concurrent reads
-        devices = self._fetch_devices(home_id)
+        try:
+            devices = self._fetch_devices(home_id)
+        except HomeUnreachableError:
+            # Serve a stale cache through brief HA outages; with nothing
+            # cached, surface the outage instead of pretending "no devices".
+            if cached:
+                logger.warning(
+                    f"HADeviceRegistry: HA unreachable for home={home_id}; "
+                    f"serving stale cache ({len(cached[1])} devices)"
+                )
+                return cached[1]
+            raise
         with self._lock:
             self._cache[home_id] = (time.monotonic(), devices)
         return devices
@@ -114,7 +134,13 @@ class HADeviceRegistry:
         return None
 
     def device_id_for_entity(self, home_id: str, entity_id: str) -> Optional[str]:
-        for d in self.list_devices(home_id):
+        # Best-effort enrichment: entity favorites must keep working while
+        # HA is down, so an outage degrades to "no device attached".
+        try:
+            devices = self.list_devices(home_id)
+        except HomeUnreachableError:
+            return None
+        for d in devices:
             if entity_id in d.all_entities:
                 return d.device_id
         return None
@@ -135,10 +161,20 @@ class HADeviceRegistry:
             r = requests.get(ha_url + "/api/states", headers=headers, timeout=self._timeout)
         except requests.exceptions.RequestException as e:
             logger.error(f"HADeviceRegistry: /api/states failed home={home_id}: {e}")
-            return []
+            raise HomeUnreachableError(
+                f"Home Assistant for home '{home_id}' is unreachable"
+            ) from e
         if r.status_code != 200:
             logger.error(f"HADeviceRegistry: /api/states returned {r.status_code} home={home_id}")
-            return []
+            if r.status_code in (401, 403):
+                raise HomeUnreachableError(
+                    f"Home Assistant for home '{home_id}' is rejecting the "
+                    f"orchestrator's access token (HTTP {r.status_code}) — "
+                    f"the home's token needs to be renewed"
+                )
+            raise HomeUnreachableError(
+                f"Home Assistant for home '{home_id}' returned HTTP {r.status_code}"
+            )
         states = r.json()
         entity_ids = [s["entity_id"] for s in states]
 
@@ -156,10 +192,14 @@ class HADeviceRegistry:
             )
         except requests.exceptions.RequestException as e:
             logger.error(f"HADeviceRegistry: template (entity->device) failed home={home_id}: {e}")
-            return []
+            raise HomeUnreachableError(
+                f"Home Assistant for home '{home_id}' is unreachable"
+            ) from e
         if r2.status_code != 200:
             logger.error(f"HADeviceRegistry: template returned {r2.status_code} home={home_id}")
-            return []
+            raise HomeUnreachableError(
+                f"Home Assistant for home '{home_id}' returned HTTP {r2.status_code}"
+            )
         ent_to_dev = json.loads(r2.text)
 
         # 3. Group entities by device_id; skip orphan entities (no device).
