@@ -60,6 +60,7 @@ Error envelope: { "error": "...", "code": "OPTIONAL_CODE" }
 
 import json
 import logging
+import re
 from typing import Optional
 
 from flask import g, jsonify, request
@@ -1028,23 +1029,35 @@ class VoiceAuthController(BaseController):
         views_out = []
         all_entities: list = []
         seen: set = set()
-        for view in config.get("views") or []:
-            entities = extract_entity_ids(view)
-            views_out.append({
-                "title": view.get("title"),
-                "path": view.get("path"),
-                "icon": view.get("icon"),
-                "entity_count": len(entities),
-                "entities": entities,
-            })
-            for e in entities:
-                if e not in seen:
-                    seen.add(e)
-                    all_entities.append(e)
+        strategy = config.get("strategy") if isinstance(config.get("strategy"), dict) else None
+        if strategy and not config.get("views"):
+            # Strategy dashboards (HA's auto-generated Overview and friends)
+            # store a recipe, not views — the HA frontend expands it
+            # client-side. Mirror the useful part here: one view per area,
+            # built from the device registry.
+            try:
+                views_out, all_entities = self._expand_strategy_views(home_id, strategy)
+            except HomeUnreachableError as ex:
+                return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
+        else:
+            for view in config.get("views") or []:
+                entities = extract_entity_ids(view)
+                views_out.append({
+                    "title": view.get("title"),
+                    "path": view.get("path"),
+                    "icon": view.get("icon"),
+                    "entity_count": len(entities),
+                    "entities": entities,
+                })
+                for e in entities:
+                    if e not in seen:
+                        seen.add(e)
+                        all_entities.append(e)
         body = {
             "home_id": home_id,
             "url_path": url_path,
             "title": config.get("title"),
+            "strategy": strategy.get("type") if strategy else None,
             "view_count": len(views_out),
             "views": views_out,
             "entities": all_entities,
@@ -1053,6 +1066,56 @@ class VoiceAuthController(BaseController):
         if include_config:
             body["config"] = config
         return jsonify(body), 200
+
+    @staticmethod
+    def _area_slug(name: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+
+    def _expand_strategy_views(self, home_id: str, strategy: dict) -> tuple:
+        """Expand a strategy dashboard into (views, entities): one view per
+        area, honoring the strategy's hidden/order area lists (which use
+        area slugs, while the registry carries display names). Entities
+        without a device area are omitted — same net effect as the
+        original-states strategy's hide_entities_without_area. Returns
+        empty views when no registry is wired."""
+        if self._registry is None:
+            return [], []
+        areas_opt = strategy.get("areas") or {}
+        hidden = set(areas_opt.get("hidden") or [])
+        order = list(areas_opt.get("order") or [])
+
+        by_area: dict = {}
+        for d in self._registry.list_devices(home_id):
+            if not d.area:
+                continue
+            by_area.setdefault(d.area, []).extend(d.all_entities)
+
+        def _sort_key(area_name: str):
+            slug = self._area_slug(area_name)
+            rank = order.index(slug) if slug in order else len(order)
+            return (rank, area_name.lower())
+
+        views, flat, seen = [], [], set()
+        for area in sorted(by_area, key=_sort_key):
+            slug = self._area_slug(area)
+            if slug in hidden:
+                continue
+            entities = []
+            for e in by_area[area]:
+                if e not in entities:
+                    entities.append(e)
+            views.append({
+                "title": area,
+                "path": slug,
+                "icon": None,
+                "entity_count": len(entities),
+                "entities": entities,
+            })
+            for e in entities:
+                if e not in seen:
+                    seen.add(e)
+                    flat.append(e)
+        return views, flat
 
     # ------- favorites/{id}/fire --------------------------------------------
 

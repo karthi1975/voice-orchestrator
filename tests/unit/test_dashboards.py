@@ -210,6 +210,13 @@ class TestDashboardClient:
 # --- HTTP layer ---------------------------------------------------------------
 
 
+def _device(area, entities):
+    d = MagicMock()
+    d.area = area
+    d.all_entities = entities
+    return d
+
+
 @pytest.fixture
 def http(dispatcher):
     svc = VoiceAuthService(
@@ -218,10 +225,14 @@ def http(dispatcher):
         phone_repo=InMemoryPhoneMappingRepository(),
     )
     dash = MagicMock(spec=HADashboardClient)
-    controller = VoiceAuthController(service=svc, dispatcher=dispatcher, dashboard_client=dash)
+    registry = MagicMock()
+    registry.list_devices.return_value = []
+    controller = VoiceAuthController(
+        service=svc, dispatcher=dispatcher, dashboard_client=dash, device_registry=registry
+    )
     app = Flask(__name__)
     app.register_blueprint(controller.blueprint)
-    return app.test_client(), dash
+    return app.test_client(), dash, registry
 
 
 BASE = "/api/v1/voice-auth"
@@ -230,7 +241,7 @@ Q = "user_ref=scott_mobile&home_id=h1"
 
 class TestDashboardEndpoints:
     def test_list_ok(self, http):
-        client, dash = http
+        client, dash, _ = http
         dash.list_dashboards.return_value = [{"url_path": None, "title": "Overview"}]
         r = client.get(f"{BASE}/dashboards?{Q}")
         assert r.status_code == 200
@@ -238,24 +249,24 @@ class TestDashboardEndpoints:
         dash.list_dashboards.assert_called_once_with("h1")
 
     def test_missing_params_400(self, http):
-        client, _ = http
+        client, _, _ = http
         r = client.get(f"{BASE}/dashboards?home_id=h1")
         assert r.status_code == 400
 
     def test_unknown_home_404(self, http):
-        client, _ = http
+        client, _, _ = http
         r = client.get(f"{BASE}/dashboards?user_ref=u&home_id=nope")
         assert r.status_code == 404
 
     def test_unreachable_503(self, http):
-        client, dash = http
+        client, dash, _ = http
         dash.list_dashboards.side_effect = HomeUnreachableError("HA down")
         r = client.get(f"{BASE}/dashboards?{Q}")
         assert r.status_code == 503
         assert r.get_json()["code"] == "HOME_UNREACHABLE"
 
     def test_config_extracts_entities_per_view(self, http):
-        client, dash = http
+        client, dash, _ = http
         dash.get_config.return_value = {
             "title": "Home",
             "views": [
@@ -276,7 +287,7 @@ class TestDashboardEndpoints:
         assert "config" not in body  # only with include_config=true
 
     def test_config_include_config_and_url_path(self, http):
-        client, dash = http
+        client, dash, _ = http
         dash.get_config.return_value = {"title": "Tablet", "views": []}
         r = client.get(f"{BASE}/dashboards/config?{Q}&url_path=tablet&include_config=true")
         assert r.status_code == 200
@@ -284,25 +295,58 @@ class TestDashboardEndpoints:
         assert r.get_json()["config"] == {"title": "Tablet", "views": []}
 
     def test_config_not_configured_409(self, http):
-        client, dash = http
+        client, dash, _ = http
         dash.get_config.side_effect = DashboardNotConfiguredError("auto-generated")
         r = client.get(f"{BASE}/dashboards/config?{Q}")
         assert r.status_code == 409
         assert r.get_json()["code"] == "DASHBOARD_NOT_CONFIGURED"
 
     def test_config_unknown_dashboard_404(self, http):
-        client, dash = http
+        client, dash, _ = http
         dash.get_config.side_effect = DashboardNotFoundError("unknown", code="not_found")
         r = client.get(f"{BASE}/dashboards/config?{Q}&url_path=nope")
         assert r.status_code == 404
         assert r.get_json()["code"] == "DASHBOARD_NOT_FOUND"
 
     def test_config_other_ha_error_502(self, http):
-        client, dash = http
+        client, dash, _ = http
         dash.get_config.side_effect = DashboardError("kaboom", code="unknown_error")
         r = client.get(f"{BASE}/dashboards/config?{Q}")
         assert r.status_code == 502
         assert r.get_json()["code"] == "HA_ERROR"
+
+    def test_strategy_dashboard_expands_to_area_views(self, http):
+        client, dash, registry = http
+        dash.get_config.return_value = {
+            "strategy": {
+                "type": "original-states",
+                "hide_entities_without_area": True,
+                "areas": {"hidden": ["bat_cave"], "order": ["office_at_qli"]},
+            }
+        }
+        registry.list_devices.return_value = [
+            _device("Bat Cave", ["light.bat_lamp"]),          # hidden -> dropped
+            _device("Living Room", ["light.sofa", "sensor.temp"]),
+            _device("Office at QLI", ["switch.bat_sign"]),    # ordered first
+            _device(None, ["scene.orphan"]),                  # no area -> dropped
+            _device("Living Room", ["light.sofa"]),           # duplicate entity deduped
+        ]
+        r = client.get(f"{BASE}/dashboards/config?{Q}")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["strategy"] == "original-states"
+        assert [v["title"] for v in body["views"]] == ["Office at QLI", "Living Room"]
+        assert body["views"][0]["entities"] == ["switch.bat_sign"]
+        assert body["views"][1]["entities"] == ["light.sofa", "sensor.temp"]
+        assert body["entities"] == ["switch.bat_sign", "light.sofa", "sensor.temp"]
+
+    def test_strategy_dashboard_unreachable_registry_503(self, http):
+        client, dash, registry = http
+        dash.get_config.return_value = {"strategy": {"type": "original-states"}}
+        registry.list_devices.side_effect = HomeUnreachableError("HA down")
+        r = client.get(f"{BASE}/dashboards/config?{Q}")
+        assert r.status_code == 503
+        assert r.get_json()["code"] == "HOME_UNREACHABLE"
 
     def test_not_wired_503(self, dispatcher):
         svc = VoiceAuthService(
