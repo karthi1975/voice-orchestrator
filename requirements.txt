@@ -1,5 +1,6 @@
 flask==3.0.0
 requests==2.31.0
+websocket-client==1.8.0  # HA WebSocket API (dashboards)
 
 # Database (Phase 7)
 sqlalchemy>=2.0.35  # Python 3.13 compatible

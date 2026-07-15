@@ -39,6 +39,13 @@ Endpoints:
   GET    /devices/discover         enumerate physical HA devices for a home
   GET    /items/search             unified search across devices/entities/scenes/scripts/automations
 
+  GET    /dashboards               list a home's HA dashboards (WebSocket lovelace/dashboards/list)
+  GET    /dashboards/config        one dashboard's views + referenced entity_ids
+                                   (WebSocket lovelace/config). Dashboards are
+                                   home-level in HA: every user of a home sees
+                                   the same list; user_ref is required only for
+                                   auth/audit parity with the rest of the API.
+
   POST   /voice-enable             provision a VAPI phone number for (user_ref, home_id)
   GET    /voice-enable             status check by user_ref query param
   DELETE /voice-enable             release VAPI number for ?user_ref=...
@@ -73,6 +80,13 @@ from app.services.favorite_device_service import (
 from app.services.scene_webhook_mapping_service import SceneWebhookMappingService
 from app.services.vapi_provisioning_service import VapiProvisioningService
 from app.services.voice_auth_service import VoiceAuthService
+from app.infrastructure.home_assistant.dashboard_client import (
+    DashboardError,
+    DashboardNotConfiguredError,
+    DashboardNotFoundError,
+    HADashboardClient,
+    extract_entity_ids,
+)
 from app.infrastructure.home_assistant.device_registry import (
     HADeviceRegistry,
     HomeUnreachableError,
@@ -160,6 +174,7 @@ class VoiceAuthController(BaseController):
         favorite_service: Optional[FavoriteDeviceService] = None,
         vapi_provisioning_service: Optional[VapiProvisioningService] = None,
         device_registry: Optional[HADeviceRegistry] = None,
+        dashboard_client: Optional[HADashboardClient] = None,
         url_prefix: str = "/api/v1/voice-auth",
     ):
         super().__init__("voice_auth_api", url_prefix)
@@ -169,6 +184,7 @@ class VoiceAuthController(BaseController):
         self._favorites = favorite_service
         self._vapi_prov = vapi_provisioning_service
         self._registry = device_registry
+        self._dashboards = dashboard_client
         self._register_routes()
 
     def _register_routes(self) -> None:
@@ -205,6 +221,9 @@ class VoiceAuthController(BaseController):
 
         bp.add_url_rule("/devices/discover", "discover_devices", self.discover_devices, methods=["GET"])
         bp.add_url_rule("/items/search", "search_items", self.search_items, methods=["GET"])
+
+        bp.add_url_rule("/dashboards", "list_dashboards", self.list_dashboards, methods=["GET"])
+        bp.add_url_rule("/dashboards/config", "get_dashboard_config", self.get_dashboard_config, methods=["GET"])
 
         bp.add_url_rule("/voice-enable", "voice_enable", self.voice_enable, methods=["POST"])
         bp.add_url_rule("/voice-enable", "voice_enable_status", self.voice_enable_status, methods=["GET"])
@@ -942,6 +961,98 @@ class VoiceAuthController(BaseController):
             "count": len(items),
             "items": items,
         }), 200
+
+    # ------- dashboards ------------------------------------------------------
+
+    def _dashboard_args(self):
+        """Shared validation for the dashboard endpoints: returns
+        (home_id, error_response). user_ref is required for parity with the
+        rest of the mobile surface (the auth middleware scopes JWT callers
+        by home ownership); the dashboard data itself is home-level — HA
+        gives our shared token one view for all users of a home."""
+        if self._dashboards is None:
+            return None, (jsonify({
+                "error": "dashboard client not configured",
+                "code": "NOT_CONFIGURED",
+            }), 503)
+        user_ref = request.args.get("user_ref", "").strip()
+        home_id = request.args.get("home_id", "").strip()
+        if not user_ref or not home_id:
+            return None, (jsonify({
+                "error": "user_ref and home_id query params are required",
+                "code": "VALIDATION",
+            }), 400)
+        if not self._dispatcher.has_home(home_id):
+            return None, (jsonify({"error": f"home '{home_id}' not configured", "code": "NOT_CONFIGURED"}), 404)
+        return home_id, None
+
+    def list_dashboards(self):
+        """GET /dashboards?user_ref=&home_id= — enumerate the home's HA
+        dashboards. The default 'Overview' (url_path null) is always first."""
+        home_id, err = self._dashboard_args()
+        if err:
+            return err
+        try:
+            items = self._dashboards.list_dashboards(home_id)
+        except HomeUnreachableError as ex:
+            return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
+        except DashboardError as ex:
+            return jsonify({"error": str(ex), "code": "HA_ERROR"}), 502
+        return jsonify({"home_id": home_id, "count": len(items), "items": items}), 200
+
+    def get_dashboard_config(self):
+        """GET /dashboards/config?user_ref=&home_id=[&url_path=][&include_config=true]
+
+        Returns the dashboard's views with the entity_ids each one references
+        — the bits a mobile UI can act on. Card schemas are frontend-specific
+        (custom HACS cards etc.), so the raw Lovelace config is only included
+        when include_config=true. url_path omitted = default Overview.
+        """
+        home_id, err = self._dashboard_args()
+        if err:
+            return err
+        url_path = (request.args.get("url_path") or "").strip() or None
+        include_config = (request.args.get("include_config") or "").strip().lower() in ("1", "true", "yes")
+        try:
+            config = self._dashboards.get_config(home_id, url_path)
+        except HomeUnreachableError as ex:
+            return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
+        except DashboardNotConfiguredError as ex:
+            return jsonify({"error": str(ex), "code": "DASHBOARD_NOT_CONFIGURED"}), 409
+        except DashboardNotFoundError as ex:
+            return jsonify({"error": str(ex), "code": "DASHBOARD_NOT_FOUND"}), 404
+        except DashboardError as ex:
+            return jsonify({"error": str(ex), "code": "HA_ERROR"}), 502
+
+        config = config or {}
+        views_out = []
+        all_entities: list = []
+        seen: set = set()
+        for view in config.get("views") or []:
+            entities = extract_entity_ids(view)
+            views_out.append({
+                "title": view.get("title"),
+                "path": view.get("path"),
+                "icon": view.get("icon"),
+                "entity_count": len(entities),
+                "entities": entities,
+            })
+            for e in entities:
+                if e not in seen:
+                    seen.add(e)
+                    all_entities.append(e)
+        body = {
+            "home_id": home_id,
+            "url_path": url_path,
+            "title": config.get("title"),
+            "view_count": len(views_out),
+            "views": views_out,
+            "entities": all_entities,
+            "entity_count": len(all_entities),
+        }
+        if include_config:
+            body["config"] = config
+        return jsonify(body), 200
 
     # ------- favorites/{id}/fire --------------------------------------------
 

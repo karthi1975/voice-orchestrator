@@ -18,6 +18,7 @@ from routes.vapi import vapi_bp
 from app import DependencyContainer
 from app.middleware.auth_middleware import setup_auth_middleware
 from app.controllers.voice_auth_controller import VoiceAuthController
+from app.infrastructure.home_assistant.dashboard_client import HADashboardClient
 from app.infrastructure.home_assistant.device_registry import HADeviceRegistry
 from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
 from app.middleware.voice_auth_api_key import attach_mobile_api_key_auth
@@ -164,6 +165,7 @@ def _build_favorite_service(home_validator, device_registry, voice_auth_service)
 voice_auth_service = _build_voice_auth_service()
 voice_auth_dispatcher = HADirectDispatcher.from_env()
 device_registry = HADeviceRegistry(voice_auth_dispatcher, cache_ttl_seconds=60)
+dashboard_client = HADashboardClient(voice_auth_dispatcher, cache_ttl_seconds=30)
 favorite_service = _build_favorite_service(
     home_validator=voice_auth_dispatcher.has_home,
     device_registry=device_registry,
@@ -187,6 +189,7 @@ voice_auth_controller = VoiceAuthController(
     favorite_service=favorite_service,
     vapi_provisioning_service=vapi_provisioning_service,
     device_registry=device_registry,
+    dashboard_client=dashboard_client,
 )
 
 # Tier 2 auth: mobile login + identity bootstrap. Reuses the container's
