@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SmartHome — Boards</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1400px 700px at 50% -10%, #142746 0%, #0a1220 45%, #05080f 100%);
+    color: #e6ecff;
+    display: flex; justify-content: center;
+    padding: 16px;
+  }
+  .phone {
+    width: 100%; max-width: 430px; min-height: 92vh;
+    display: flex; flex-direction: column;
+  }
+
+  /* ---- header ---- */
+  .top {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 4px 16px;
+  }
+  .top h1 { margin: 0; font-size: 22px; font-weight: 700; flex: 1; }
+  .top .sub { color: #8ea0c6; font-size: 12.5px; }
+  .iconbtn {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10);
+    color: #cfd8ee; border-radius: 12px; padding: 10px 14px; font-size: 15px; cursor: pointer;
+  }
+
+  .banner {
+    display: none; margin: 0 0 12px; padding: 10px 14px; border-radius: 10px;
+    font-size: 13.5px; border: 1px solid #5a4a20; background: #2e2610; color: #ffd98a;
+  }
+  .banner.err { border-color: #552020; background: #3a1414; color: #ffb3b3; }
+  .banner.show { display: block; }
+
+  /* ---- connect sheet ---- */
+  .card {
+    background: rgba(255,255,255,0.035);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px; padding: 22px; margin-bottom: 14px;
+  }
+  .card h2 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0 0 14px; color: #8ea0c6; font-size: 13.5px; line-height: 1.5; }
+  label { display: block; font-size: 12px; color: #8ea0c6; margin: 12px 0 5px; letter-spacing: .3px; }
+  input {
+    width: 100%; padding: 12px 14px; border-radius: 10px; font-size: 15px;
+    background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); color: #e6ecff;
+  }
+  .primary {
+    width: 100%; margin-top: 18px; padding: 14px; border-radius: 12px; border: 0;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+    background: linear-gradient(180deg, #5dfeca 0%, #2fd6a4 100%); color: #052b1f;
+  }
+
+  /* ---- dashboards list ---- */
+  .dash {
+    display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+    background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px; padding: 18px; margin-bottom: 10px; cursor: pointer; color: #e6ecff;
+  }
+  .dash:active { background: rgba(255,255,255,0.08); }
+  .dash .emoji { font-size: 26px; }
+  .dash .name { font-size: 17px; font-weight: 600; }
+  .dash .meta { color: #8ea0c6; font-size: 12.5px; margin-top: 2px; }
+  .dash .chev { margin-left: auto; color: #5dfeca; font-size: 20px; }
+
+  /* ---- view tabs ---- */
+  .tabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 14px; }
+  .tab {
+    white-space: nowrap; padding: 10px 16px; border-radius: 999px; font-size: 14px; cursor: pointer;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.10); color: #cfd8ee;
+  }
+  .tab.on {
+    background: rgba(93,254,202,0.14); border-color: rgba(93,254,202,0.45);
+    color: #5dfeca; font-weight: 600;
+  }
+
+  /* ---- board grid ---- */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-bottom: 24px; }
+  .tile {
+    min-height: 110px; border-radius: 18px; padding: 16px; text-align: left; cursor: pointer;
+    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.09);
+    color: #e6ecff; display: flex; flex-direction: column; gap: 8px; font-size: 15px;
+  }
+  .tile:active { transform: scale(0.97); }
+  .tile .emoji { font-size: 28px; }
+  .tile .tname { font-weight: 600; line-height: 1.25; }
+  .tile .tdom { color: #8ea0c6; font-size: 12px; text-transform: capitalize; }
+  .tile.fired { border-color: rgba(93,254,202,0.6); background: rgba(93,254,202,0.10); }
+  .tile.gated { border-color: rgba(255,196,0,0.45); }
+  .tile.sensor { opacity: 0.55; cursor: default; }
+  .stale .tile { opacity: 0.45; pointer-events: none; }
+
+  .empty { color: #8ea0c6; text-align: center; padding: 40px 10px; font-size: 14.5px; }
+  .spin { text-align: center; color: #5dfeca; padding: 36px 0; font-size: 14px; }
+
+  footer { text-align: center; color: #4a5578; font-size: 11.5px; padding: 10px 0 4px; margin-top: auto; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="top">
+    <h1 id="title">Boards</h1>
+    <button class="iconbtn" id="backBtn" style="display:none">‹ Boards</button>
+    <button class="iconbtn" id="setupBtn" title="Connection settings">⚙︎</button>
+  </div>
+  <div class="banner" id="banner"></div>
+  <div id="screen"></div>
+  <footer>SmartHome boards prototype · rooms come from Home Assistant · Tetradapt</footer>
+</div>
+
+<script>
+const API = "/api/v1/voice-auth";
+const store = {
+  get cfg() { try { return JSON.parse(localStorage.boardsCfg || "null"); } catch { return null; } },
+  set cfg(v) { localStorage.boardsCfg = JSON.stringify(v); },
+  get pref() { try { return JSON.parse(localStorage.boardsPref || "null"); } catch { return null; } },
+  set pref(v) { localStorage.boardsPref = JSON.stringify(v); },
+  cache(key, v) { if (v !== undefined) localStorage["cache_" + key] = JSON.stringify(v);
+                  try { return JSON.parse(localStorage["cache_" + key] || "null"); } catch { return null; } },
+};
+
+const EMOJI = { light:"💡", switch:"🔌", lock:"🔒", cover:"🪟", climate:"🌡️", fan:"🌀",
+  media_player:"🔊", scene:"🎬", script:"📜", automation:"⚙️", camera:"📷",
+  sensor:"📈", binary_sensor:"🚪", vacuum:"🧹", button:"🔘", input_boolean:"🎚️" };
+const SENSOR_ONLY = new Set(["sensor", "binary_sensor", "camera", "device_tracker", "update", "event", "sun", "zone", "person", "weather"]);
+
+const el = (id) => document.getElementById(id);
+const screen = el("screen"), banner = el("banner");
+function note(msg, isErr) {
+  banner.textContent = msg; banner.className = "banner show" + (isErr ? " err" : "");
+  if (!isErr) setTimeout(() => banner.classList.remove("show"), 4000);
+}
+function pretty(entityId) {
+  const s = entityId.split(".")[1] || entityId;
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+async function api(path) {
+  const c = store.cfg;
+  const r = await fetch(API + path, { headers: { Authorization: "Bearer " + c.key } });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(body.error || ("HTTP " + r.status)); e.code = body.code; throw e; }
+  return body;
+}
+
+/* ---------- screens ---------- */
+
+function showSetup() {
+  const c = store.cfg || {};
+  el("backBtn").style.display = "none";
+  el("title").textContent = "Connect";
+  screen.innerHTML = `
+    <div class="card">
+      <h2>Connect to your home</h2>
+      <p>One-time setup. The key stays on this device only.</p>
+      <label>API key</label><input id="f_key" type="password" value="${c.key || ""}" placeholder="sk_ios_…">
+      <label>User</label><input id="f_user" value="${c.user || "scott_mobile"}">
+      <label>Home</label><input id="f_home" value="${c.home || "scott_home"}">
+      <button class="primary" id="go">Connect</button>
+    </div>`;
+  el("go").onclick = () => {
+    store.cfg = { key: el("f_key").value.trim(), user: el("f_user").value.trim(), home: el("f_home").value.trim() };
+    boot();
+  };
+}
+
+async function showDashboards() {
+  el("backBtn").style.display = "none";
+  el("title").textContent = "Boards";
+  screen.innerHTML = `<div class="spin">Loading your boards…</div>`;
+  let data;
+  try {
+    data = await api(`/dashboards?user_ref=${store.cfg.user}&home_id=${store.cfg.home}`);
+    store.cache("dashlist", data);
+  } catch (e) {
+    data = store.cache("dashlist");
+    note(e.code === "HOME_UNREACHABLE" ? "Home unreachable — showing last known boards" : e.message, !data);
+    if (!data) { screen.innerHTML = `<div class="empty">Could not reach your home.<br>Pull down or tap ⚙︎ to check settings.</div>`; return; }
+  }
+  screen.innerHTML = data.items.map((d, i) => `
+    <button class="dash" data-i="${i}">
+      <span class="emoji">${d.is_default ? "🏠" : "👤"}</span>
+      <span><div class="name">${d.title || "Overview"}</div>
+      <div class="meta">${d.is_default ? "whole home" : (d.url_path || "")}</div></span>
+      <span class="chev">›</span>
+    </button>`).join("");
+  screen.querySelectorAll(".dash").forEach((b) =>
+    b.onclick = () => showBoard(data.items[+b.dataset.i], null));
+}
+
+async function showBoard(dash, viewPath) {
+  el("backBtn").style.display = "";
+  el("title").textContent = dash.title || "Overview";
+  screen.innerHTML = `<div class="spin">Opening ${dash.title || "board"}…</div>`;
+  const qs = dash.url_path ? "&url_path=" + encodeURIComponent(dash.url_path) : "";
+  const cacheKey = "board_" + (dash.url_path || "default");
+  let cfg, stale = false;
+  try {
+    cfg = await api(`/dashboards/config?user_ref=${store.cfg.user}&home_id=${store.cfg.home}${qs}`);
+    store.cache(cacheKey, cfg);
+  } catch (e) {
+    cfg = store.cache(cacheKey); stale = true;
+    note(e.code === "HOME_UNREACHABLE" ? "Home unreachable — showing last known view" : e.message, !cfg);
+    if (!cfg) { screen.innerHTML = `<div class="empty">Nothing cached for this board yet.</div>`; return; }
+  }
+  const views = cfg.views || [];
+  if (!views.length) { screen.innerHTML = `<div class="empty">This board has no views yet.<br>Add some in Home Assistant and it will appear here.</div>`; return; }
+  const active = views.find((v) => v.path === viewPath) || views[0];
+  store.pref = { dash, viewPath: active.path };
+
+  screen.innerHTML = `
+    <div class="tabs">${views.map((v) =>
+      `<button class="tab ${v.path === active.path ? "on" : ""}" data-p="${v.path}">${v.title || v.path} · ${v.entity_count}</button>`).join("")}
+    </div>
+    <div class="grid ${stale ? "stale" : ""}">${active.entities.map((e) => {
+      const dom = e.split(".")[0], sensor = SENSOR_ONLY.has(dom);
+      return `<button class="tile ${sensor ? "sensor" : ""}" data-e="${e}">
+        <span class="emoji">${EMOJI[dom] || "🔘"}</span>
+        <span class="tname">${pretty(e)}</span>
+        <span class="tdom">${dom.replace("_", " ")}</span>
+      </button>`; }).join("")}
+    </div>`;
+
+  screen.querySelectorAll(".tab").forEach((t) => t.onclick = () => showBoard(dash, t.dataset.p));
+  screen.querySelectorAll(".tile:not(.sensor)").forEach((t) => t.onclick = () => fire(t));
+}
+
+async function fire(tile) {
+  const entity = tile.dataset.e, [dom, suffix] = entity.split(".");
+  tile.classList.add("fired");
+  try {
+    const c = store.cfg;
+    const r = await fetch(API + "/automations/trigger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + c.key },
+      body: JSON.stringify({ home_id: c.home, ha_service: dom, ha_entity: suffix,
+                             user_ref: c.user, automation_id: suffix }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (r.status === 409 && body.code === "ENROLLMENT_REQUIRED") {
+      tile.classList.add("gated");
+      note("🎤 " + pretty(entity) + " needs voice authentication — use the voice assistant");
+    } else if (!r.ok || body.success === false) {
+      note(body.error || body.message || "Could not reach the device", true);
+    } else {
+      note("✓ " + pretty(entity) + " activated");
+    }
+  } catch (e) { note(e.message, true); }
+  setTimeout(() => tile.classList.remove("fired"), 900);
+}
+
+/* ---------- boot ---------- */
+el("setupBtn").onclick = showSetup;
+el("backBtn").onclick = showDashboards;
+function boot() {
+  if (!store.cfg || !store.cfg.key) return showSetup();
+  const p = store.pref;
+  if (p && p.dash) showBoard(p.dash, p.viewPath);   // open on my board
+  else showDashboards();
+}
+boot();
+</script>
+</body>
+</html>
