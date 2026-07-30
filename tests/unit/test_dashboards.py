@@ -206,6 +206,58 @@ class TestDashboardClient:
         ):
             assert client.list_dashboards("h1") == first
 
+    def test_registry_and_icons_share_one_connection(self, dispatcher):
+        """Both commands go out before either reply is read — connecting and
+        authenticating costs more than the commands themselves."""
+        frames = AUTH_OK + [
+            {"id": 2, "type": "result", "success": True,
+             "result": {"resources": {"tplink": {"sensor": {"signal_level": {"default": "mdi:signal"}}}}}},
+            {"id": 1, "type": "result", "success": True, "result": [
+                {"entity_id": "sensor.deck_light_signal_level", "platform": "tplink",
+                 "translation_key": "signal_level", "entity_category": "diagnostic",
+                 "options": {"ignored": "bulk"}},
+                {"entity_id": None},  # rows without an entity_id are skipped
+            ]},
+        ]
+        client, fake, patcher = _client(dispatcher, frames)
+        with patcher:
+            registry, resources = client.get_entity_registry_and_icons("h1")
+        assert fake.sent[1]["type"] == "config/entity_registry/list"
+        assert fake.sent[2]["type"] == "frontend/get_icons"
+        assert list(resources) == ["tplink"]
+        assert list(registry) == ["sensor.deck_light_signal_level"]
+        # Fat fields are dropped before caching
+        assert "options" not in registry["sensor.deck_light_signal_level"]
+        assert registry["sensor.deck_light_signal_level"]["translation_key"] == "signal_level"
+
+    def test_out_of_order_replies_are_matched_by_id(self, dispatcher):
+        """Reply order is not command order; results must still line up."""
+        frames = AUTH_OK + [
+            {"id": 2, "type": "result", "success": True, "result": {"resources": {}}},
+            {"id": 99, "type": "event"},  # unrelated frame in the middle
+            {"id": 1, "type": "result", "success": True, "result": []},
+        ]
+        client, _, patcher = _client(dispatcher, frames)
+        with patcher:
+            registry, resources = client.get_entity_registry_and_icons("h1")
+        assert registry == {} and resources == {}
+
+    def test_registry_uses_the_static_ttl_not_the_dashboard_ttl(self, dispatcher):
+        """Dashboards refresh every 30s; the registry must not re-fetch with them."""
+        client = HADashboardClient(dispatcher, cache_ttl_seconds=0, static_cache_ttl_seconds=600)
+        frames = AUTH_OK + [
+            {"id": 1, "type": "result", "success": True, "result": []},
+            {"id": 2, "type": "result", "success": True, "result": {"resources": {}}},
+        ]
+        fake = FakeWS(frames)
+        with patch(
+            "app.infrastructure.home_assistant.dashboard_client.websocket.create_connection",
+            return_value=fake,
+        ):
+            client.get_entity_registry_and_icons("h1")
+            # A second call with no frames left would raise IndexError if it refetched
+            assert client.get_entity_registry_and_icons("h1") == ({}, {})
+
 
 # --- HTTP layer ---------------------------------------------------------------
 
@@ -217,8 +269,7 @@ def _device(area, entities):
     return d
 
 
-@pytest.fixture
-def http(dispatcher):
+def _build_http(dispatcher, entity_metadata=None):
     svc = VoiceAuthService(
         enrollment_repo=InMemoryEnrollmentRepository(),
         log_repo=InMemoryChallengeLogRepository(),
@@ -228,11 +279,21 @@ def http(dispatcher):
     registry = MagicMock()
     registry.list_devices.return_value = []
     controller = VoiceAuthController(
-        service=svc, dispatcher=dispatcher, dashboard_client=dash, device_registry=registry
+        service=svc,
+        dispatcher=dispatcher,
+        dashboard_client=dash,
+        device_registry=registry,
+        entity_metadata=entity_metadata,
     )
     app = Flask(__name__)
     app.register_blueprint(controller.blueprint)
     return app.test_client(), dash, registry
+
+
+@pytest.fixture
+def http(dispatcher):
+    """No entity_metadata wired — the pre-metadata behavior, still supported."""
+    return _build_http(dispatcher)
 
 
 BASE = "/api/v1/voice-auth"
@@ -360,3 +421,314 @@ class TestDashboardEndpoints:
         r = app.test_client().get(f"{BASE}/dashboards?{Q}")
         assert r.status_code == 503
         assert r.get_json()["code"] == "NOT_CONFIGURED"
+
+
+# --- entity_meta and the tile filters -----------------------------------------
+
+
+META_ROWS = {
+    "switch.deck_light": {
+        "name": "Deck light", "domain": "switch", "icon": "mdi:toggle-switch",
+        "icon_source": "domain", "device_class": None, "unit_of_measurement": None,
+        "entity_category": None, "hidden": False, "state": "off", "controllable": True,
+    },
+    "sensor.deck_light_signal_level": {
+        "name": "Deck light Signal level", "domain": "sensor", "icon": "mdi:signal",
+        "icon_source": "translation", "device_class": None, "unit_of_measurement": None,
+        "entity_category": "diagnostic", "hidden": False, "state": "2", "controllable": False,
+    },
+    "number.deck_light_turn_off_in": {
+        "name": "Deck light Turn off in", "domain": "number", "icon": "mdi:sleep",
+        "icon_source": "translation", "device_class": None, "unit_of_measurement": None,
+        "entity_category": "config", "hidden": False, "state": "0", "controllable": False,
+    },
+    "switch.hidden_thing": {
+        "name": "Hidden", "domain": "switch", "icon": "mdi:toggle-switch",
+        "icon_source": "domain", "device_class": None, "unit_of_measurement": None,
+        "entity_category": None, "hidden": True, "state": "on", "controllable": True,
+    },
+}
+
+ALL_FOUR = list(META_ROWS)
+
+
+@pytest.fixture
+def http_meta(dispatcher):
+    meta = MagicMock()
+    meta.get.side_effect = lambda home_id, entity_ids: {
+        e: META_ROWS[e] for e in entity_ids if e in META_ROWS
+    }
+    client, dash, registry = _build_http(dispatcher, entity_metadata=meta)
+    dash.get_config.return_value = {
+        "title": "Deck",
+        "views": [{"title": "Deck", "path": "deck",
+                   "cards": [{"entities": ALL_FOUR}]}],
+    }
+    return client, dash, meta
+
+
+class TestEntityMeta:
+    def test_meta_is_returned_per_entity(self, http_meta):
+        client, _, _ = http_meta
+        body = client.get(f"{BASE}/dashboards/config?{Q}").get_json()
+        assert body["entity_meta_available"] is True
+        assert body["entity_meta"]["sensor.deck_light_signal_level"]["icon"] == "mdi:signal"
+        assert body["entity_meta"]["switch.deck_light"]["controllable"] is True
+        # No filter requested -> nothing dropped (back-compat)
+        assert body["entities"] == ALL_FOUR
+        assert body["entity_count"] == 4
+
+    def test_primary_filter_drops_config_and_diagnostic(self, http_meta):
+        client, _, _ = http_meta
+        body = client.get(
+            f"{BASE}/dashboards/config?{Q}&include_categories=primary"
+        ).get_json()
+        assert body["entities"] == ["switch.deck_light", "switch.hidden_thing"]
+        assert body["entity_count"] == 2
+        assert body["views"][0]["entity_count"] == 2
+        assert set(body["entity_meta"]) == {"switch.deck_light", "switch.hidden_thing"}
+
+    def test_include_hidden_false(self, http_meta):
+        client, _, _ = http_meta
+        body = client.get(
+            f"{BASE}/dashboards/config?{Q}&include_categories=primary&include_hidden=false"
+        ).get_json()
+        assert body["entities"] == ["switch.deck_light"]
+
+    def test_multiple_categories(self, http_meta):
+        client, _, _ = http_meta
+        body = client.get(
+            f"{BASE}/dashboards/config?{Q}&include_categories=primary,diagnostic"
+        ).get_json()
+        assert "sensor.deck_light_signal_level" in body["entities"]
+        assert "number.deck_light_turn_off_in" not in body["entities"]
+
+    def test_bad_category_is_a_400_not_a_silent_no_op(self, http_meta):
+        client, _, _ = http_meta
+        r = client.get(f"{BASE}/dashboards/config?{Q}&include_categories=primary,bogus")
+        assert r.status_code == 400
+        assert r.get_json()["code"] == "VALIDATION"
+        assert "bogus" in r.get_json()["error"]
+
+    def test_metadata_failure_degrades_instead_of_503(self, http_meta):
+        """A board with fallback icons beats no board."""
+        client, _, meta = http_meta
+        meta.get.side_effect = HomeUnreachableError("HA down")
+        r = client.get(f"{BASE}/dashboards/config?{Q}&include_categories=primary")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["entity_meta_available"] is False
+        assert body["entity_meta"] == {}
+        # The filter could not be applied, and the response says so rather
+        # than pretending these four entities are all primary.
+        assert body["entities"] == ALL_FOUR
+
+    def test_absent_metadata_service_reports_unavailable(self, http):
+        client, dash, _ = http
+        dash.get_config.return_value = {
+            "views": [{"title": "V", "cards": [{"entity": "light.a"}]}]
+        }
+        body = client.get(f"{BASE}/dashboards/config?{Q}").get_json()
+        assert body["entity_meta_available"] is False
+        assert body["entity_meta"] == {}
+
+    def test_entities_without_metadata_are_kept(self, http_meta):
+        """A card referencing an entity HA does not know must not lose its tile."""
+        client, dash, _ = http_meta
+        dash.get_config.return_value = {
+            "views": [{"title": "V", "cards": [{"entities": ["light.ghost", "switch.deck_light"]}]}]
+        }
+        body = client.get(
+            f"{BASE}/dashboards/config?{Q}&include_categories=primary"
+        ).get_json()
+        assert body["entities"] == ["light.ghost", "switch.deck_light"]
+
+
+# --- voice_gated: the app must never have to probe for a 409 ------------------
+
+
+@pytest.fixture
+def http_gated(dispatcher):
+    """Real VoiceAuthService so the advertised flag and the fire path share
+    one source of truth — a mock here would let them drift silently."""
+    from app.domain.voice_auth_enums import ChallengeType, EnrollmentStatus
+
+    svc = VoiceAuthService(
+        enrollment_repo=InMemoryEnrollmentRepository(),
+        log_repo=InMemoryChallengeLogRepository(),
+        phone_repo=InMemoryPhoneMappingRepository(),
+    )
+    lock = svc.create_enrollment(
+        user_ref="scott_mobile", home_id="h1", automation_id="yale_yrd226_tsdb",
+        automation_name="Yale Lock", ha_service="lock", ha_entity="yale_yrd226_tsdb",
+        challenge_type=ChallengeType.STEP_UP,
+    )
+    paused = svc.create_enrollment(
+        user_ref="scott_mobile", home_id="h1", automation_id="main_lights_on",
+        automation_name="Main Lights On", ha_service="script", ha_entity="main_lights_on",
+        challenge_type=ChallengeType.VERIFICATION,
+    )
+    svc.update_status(paused.id, EnrollmentStatus.PAUSED)
+
+    meta = MagicMock()
+    meta.get.side_effect = lambda home_id, entity_ids: {
+        e: {"name": e, "domain": e.split(".")[0], "icon": "mdi:x", "icon_source": "domain",
+            "device_class": None, "unit_of_measurement": None, "entity_category": None,
+            "hidden": False, "state": "off", "controllable": True}
+        for e in entity_ids
+    }
+    dash = MagicMock(spec=HADashboardClient)
+    registry = MagicMock()
+    registry.list_devices.return_value = []
+    controller = VoiceAuthController(
+        service=svc, dispatcher=dispatcher, dashboard_client=dash,
+        device_registry=registry, entity_metadata=meta,
+    )
+    app = Flask(__name__)
+    app.register_blueprint(controller.blueprint)
+    dash.get_config.return_value = {"views": [{"title": "V", "cards": [{"entities": [
+        "lock.yale_yrd226_tsdb",     # ACTIVE enrollment -> gated
+        "script.main_lights_on",     # PAUSED enrollment -> NOT gated
+        "light.den_lamp",            # no enrollment    -> not gated
+        "scene.yale_yrd226_tsdb",    # same suffix, different domain -> gated
+    ]}]}]}
+    return app.test_client(), controller, lock
+
+class TestBoardTilesAreButtonClicks:
+    """A board tile is a button: tapping anything the board returns must fire
+    the device, never answer 409. Gated entities are withheld rather than
+    badged, and the gate itself is left alone — the lock still needs the
+    spoken challenge wherever it IS offered (favorites)."""
+
+    def test_gated_entity_is_not_a_tile(self, http_gated):
+        client, _, _ = http_gated
+        body = client.get(f"{BASE}/dashboards/config?{Q}").get_json()
+        assert "lock.yale_yrd226_tsdb" not in body["entities"]
+        assert "lock.yale_yrd226_tsdb" not in body["entity_meta"]
+
+    def test_withheld_entities_are_reported_not_silently_dropped(self, http_gated):
+        client, _, _ = http_gated
+        body = client.get(f"{BASE}/dashboards/config?{Q}").get_json()
+        assert sorted(body["gated_excluded"]) == [
+            "lock.yale_yrd226_tsdb", "scene.yale_yrd226_tsdb",
+        ]
+        assert body["gate_check_available"] is True
+
+    def test_every_returned_tile_is_ungated(self, http_gated):
+        """The guarantee Aaron builds on."""
+        client, controller, _ = http_gated
+        body = client.get(f"{BASE}/dashboards/config?{Q}").get_json()
+        assert body["entities"], "sanity: the board is not empty"
+        for entity_id in body["entities"]:
+            gated, _ = controller._is_voice_gated("scott_mobile", entity_id)
+            assert gated is False, entity_id
+            assert body["entity_meta"][entity_id]["voice_gated"] is False
+
+    def test_paused_enrollment_still_yields_a_tile(self, http_gated):
+        """PAUSED does not gate, so the tile must stay on the board."""
+        client, _, _ = http_gated
+        body = client.get(f"{BASE}/dashboards/config?{Q}").get_json()
+        assert "script.main_lights_on" in body["entities"]
+
+    def test_view_counts_reflect_the_withheld_tile(self, http_gated):
+        client, _, _ = http_gated
+        body = client.get(f"{BASE}/dashboards/config?{Q}").get_json()
+        view = body["views"][0]
+        assert view["entity_count"] == len(view["entities"])
+        assert "lock.yale_yrd226_tsdb" not in view["entities"]
+
+    def test_include_gated_puts_them_back_marked(self, http_gated):
+        client, _, lock = http_gated
+        body = client.get(f"{BASE}/dashboards/config?{Q}&include_gated=true").get_json()
+        meta = body["entity_meta"]
+        assert meta["lock.yale_yrd226_tsdb"]["voice_gated"] is True
+        assert meta["lock.yale_yrd226_tsdb"]["voice_auth_enrollment_id"] == lock.id
+        assert body["gated_excluded"] == []
+
+    def test_gate_keys_on_suffix_exactly_like_the_fire_path(self, http_gated):
+        """Same suffix, different domain — the fire path gates it, so the
+        board must withhold it too or the tile would 409."""
+        client, controller, _ = http_gated
+        body = client.get(f"{BASE}/dashboards/config?{Q}&include_gated=true").get_json()
+        assert body["entity_meta"]["scene.yale_yrd226_tsdb"]["voice_gated"] is True
+        assert controller._is_voice_gated("scott_mobile", "scene.yale_yrd226_tsdb")[0] is True
+
+    def test_flag_agrees_with_the_endpoint_that_returns_409(self, http_gated):
+        """The invariant: what the board says matches what the fire path does."""
+        client, controller, _ = http_gated
+        meta = client.get(
+            f"{BASE}/dashboards/config?{Q}&include_gated=true"
+        ).get_json()["entity_meta"]
+        for entity_id, row in meta.items():
+            gated_per_fire_path, _ = controller._is_voice_gated("scott_mobile", entity_id)
+            assert row["voice_gated"] == gated_per_fire_path, entity_id
+
+    def test_gate_lookup_failure_is_declared_not_hidden(self, http_gated):
+        """If we cannot tell what is gated we must not claim the board is
+        safe to render as plain buttons — the 409 handler is still needed."""
+        client, controller, _ = http_gated
+        with patch.object(controller._svc, "active_gate_map", side_effect=RuntimeError("db down")):
+            body = client.get(f"{BASE}/dashboards/config?{Q}").get_json()
+        assert body["gate_check_available"] is False
+        assert "lock.yale_yrd226_tsdb" in body["entities"]  # could not be withheld
+
+
+# --- GET /voice-gated ---------------------------------------------------------
+
+
+class TestVoiceGatedEndpoint:
+    """One read-only call that answers "which entities 409?" — the
+    alternative to firing commands and watching for the status code."""
+
+    def test_lists_every_gated_entity_id(self, http_gated):
+        client, _, lock = http_gated
+        body = client.get(f"{BASE}/voice-gated?user_ref=scott_mobile").get_json()
+        assert body["count"] == 1
+        row = body["items"][0]
+        assert row["entity_id"] == "lock.yale_yrd226_tsdb"
+        assert row["automation_id"] == "yale_yrd226_tsdb"
+        assert row["enrollment_id"] == lock.id
+        assert row["challenge_type"] == "STEP_UP"
+
+    def test_paused_enrollments_are_excluded(self, http_gated):
+        """PAUSED does not 409, so listing it would send users to a voice
+        session for a device that would have just worked."""
+        client, _, _ = http_gated
+        body = client.get(f"{BASE}/voice-gated?user_ref=scott_mobile").get_json()
+        assert "script.main_lights_on" not in [i["entity_id"] for i in body["items"]]
+
+    def test_matches_the_fire_path_for_every_row(self, http_gated):
+        client, controller, _ = http_gated
+        body = client.get(f"{BASE}/voice-gated?user_ref=scott_mobile").get_json()
+        for row in body["items"]:
+            assert controller._is_voice_gated("scott_mobile", row["entity_id"])[0] is True
+
+    def test_scoped_to_a_home(self, http_gated):
+        client, _, _ = http_gated
+        assert client.get(
+            f"{BASE}/voice-gated?user_ref=scott_mobile&home_id=h1"
+        ).get_json()["count"] == 1
+        assert client.get(
+            f"{BASE}/voice-gated?user_ref=scott_mobile&home_id=other"
+        ).get_json()["count"] == 0
+
+    def test_unknown_user_is_empty_not_an_error(self, http_gated):
+        client, _, _ = http_gated
+        r = client.get(f"{BASE}/voice-gated?user_ref=nobody")
+        assert r.status_code == 200
+        assert r.get_json()["items"] == []
+
+    def test_user_ref_required(self, http_gated):
+        client, _, _ = http_gated
+        r = client.get(f"{BASE}/voice-gated")
+        assert r.status_code == 400
+        assert r.get_json()["code"] == "VALIDATION"
+
+    def test_the_board_and_this_endpoint_agree(self, http_gated):
+        """gated_excluded on a board ⊆ what /voice-gated lists."""
+        client, _, _ = http_gated
+        board = client.get(f"{BASE}/dashboards/config?{Q}").get_json()
+        gated = client.get(f"{BASE}/voice-gated?user_ref=scott_mobile").get_json()
+        suffixes = {i["automation_id"] for i in gated["items"]}
+        for entity_id in board["gated_excluded"]:
+            assert entity_id.split(".", 1)[1] in suffixes

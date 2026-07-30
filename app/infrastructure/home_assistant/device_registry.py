@@ -89,11 +89,16 @@ class HADeviceRegistry:
         dispatcher: HADirectDispatcher,
         cache_ttl_seconds: int = 60,
         request_timeout_seconds: float = 30.0,
+        states_cache_ttl_seconds: int = 10,
     ):
         self._dispatcher = dispatcher
         self._ttl = cache_ttl_seconds
+        # States carry live values (on/off, temperatures), so they get a much
+        # shorter TTL than the device grouping derived from them.
+        self._states_ttl = states_cache_ttl_seconds
         self._timeout = request_timeout_seconds
         self._cache: Dict[str, Tuple[float, List[HADevice]]] = {}
+        self._states_cache: Dict[str, Tuple[float, List[dict]]] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -108,7 +113,7 @@ class HADeviceRegistry:
 
         # Fetch outside the lock to avoid blocking concurrent reads
         try:
-            devices = self._fetch_devices(home_id)
+            devices = self._fetch_devices(home_id, force_refresh=force_refresh)
         except HomeUnreachableError:
             # Serve a stale cache through brief HA outages; with nothing
             # cached, surface the outage instead of pretending "no devices".
@@ -145,9 +150,39 @@ class HADeviceRegistry:
                 return d.device_id
         return None
 
+    def get_states(self, home_id: str, force_refresh: bool = False) -> List[dict]:
+        """Raw `/api/states` rows for a home, briefly cached.
+
+        The one place every caller should go for live entity state — used for
+        tile names/state/attributes on the boards surface and for search
+        results. Kept separate from the device cache because it goes stale in
+        seconds while the device grouping does not.
+        """
+        with self._lock:
+            cached = self._states_cache.get(home_id)
+            now = time.monotonic()
+            if not force_refresh and cached and (now - cached[0]) < self._states_ttl:
+                return cached[1]
+
+        try:
+            states = self._fetch_states(home_id)
+        except HomeUnreachableError:
+            if cached:
+                logger.warning(
+                    f"HADeviceRegistry: HA unreachable for home={home_id}; "
+                    f"serving stale states ({len(cached[1])} entities)"
+                )
+                return cached[1]
+            raise
+
+        with self._lock:
+            self._states_cache[home_id] = (time.monotonic(), states)
+        return states
+
     # ------------------------------------------------------------------
 
-    def _fetch_devices(self, home_id: str) -> List[HADevice]:
+    def _fetch_states(self, home_id: str) -> List[dict]:
+        """GET /api/states, with HA's failure modes mapped to HomeUnreachableError."""
         cfg = self._dispatcher._homes.get(home_id)
         if not cfg:
             logger.warning(f"HADeviceRegistry: no HA config for home_id={home_id}")
@@ -155,8 +190,6 @@ class HADeviceRegistry:
 
         ha_url = cfg.ha_url.rstrip("/")
         headers = {"Authorization": f"Bearer {cfg.ha_token}"}
-
-        # 1. Pull every entity. We need state for filtering and for the search response.
         try:
             r = requests.get(ha_url + "/api/states", headers=headers, timeout=self._timeout)
         except requests.exceptions.RequestException as e:
@@ -175,7 +208,21 @@ class HADeviceRegistry:
             raise HomeUnreachableError(
                 f"Home Assistant for home '{home_id}' returned HTTP {r.status_code}"
             )
-        states = r.json()
+        return r.json()
+
+    def _fetch_devices(self, home_id: str, force_refresh: bool = False) -> List[HADevice]:
+        cfg = self._dispatcher._homes.get(home_id)
+        if not cfg:
+            logger.warning(f"HADeviceRegistry: no HA config for home_id={home_id}")
+            return []
+
+        ha_url = cfg.ha_url.rstrip("/")
+        headers = {"Authorization": f"Bearer {cfg.ha_token}"}
+
+        # 1. Pull every entity. We need state for filtering and for the search
+        # response. Routed through get_states so a board refresh that wants both
+        # devices and per-entity metadata makes one /api/states call, not two.
+        states = self.get_states(home_id, force_refresh=force_refresh)
         entity_ids = [s["entity_id"] for s in states]
 
         # 2. Map entity_id -> device_id via template API. One call, all entities.

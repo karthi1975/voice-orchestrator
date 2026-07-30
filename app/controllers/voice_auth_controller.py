@@ -10,6 +10,9 @@ Endpoints:
   DELETE /enrollments/{id}         revoke (soft — sets REVOKED then deletes row)
   PATCH  /enrollments/{id}/status  pause / resume
   GET    /check                    convenience: exists + cooldown + attempts
+  GET    /voice-gated              every entity_id that answers 409 for a user_ref.
+                                   Read-only; the alternative to discovering the
+                                   gate by firing commands and watching for 409s.
 
   GET    /challenges               recent challenge log for a user_ref
   GET    /challenges/{id}          single log row
@@ -37,14 +40,24 @@ Endpoints:
   POST   /favorites/{id}/fire      activate a favorite; refuses 409 if voice-gated
 
   GET    /devices/discover         enumerate physical HA devices for a home
-  GET    /items/search             unified search across devices/entities/scenes/scripts/automations
+  GET    /items/search             unified search across devices/entities/scenes/scripts/automations;
+                                   rows carry icon + voice_gated when user_ref is supplied
 
   GET    /dashboards               list a home's HA dashboards (WebSocket lovelace/dashboards/list)
   GET    /dashboards/config        one dashboard's views + referenced entity_ids
-                                   (WebSocket lovelace/config). Dashboards are
-                                   home-level in HA: every user of a home sees
-                                   the same list; user_ref is required only for
-                                   auth/audit parity with the rest of the API.
+                                   + entity_meta (name/icon/category/state per
+                                   entity). Dashboards are home-level in HA:
+                                   every user of a home sees the same list;
+                                   user_ref is required only for auth/audit
+                                   parity with the rest of the API.
+                                   include_categories=primary&include_hidden=false
+                                   trims HA's config/diagnostic entities, which
+                                   are most of an auto-generated board.
+                                   Voice-gated entities are held back by default
+                                   so every board tile is a plain button click;
+                                   they are listed in gated_excluded and stay
+                                   reachable via /favorites. include_gated=true
+                                   puts them back.
 
   POST   /voice-enable             provision a VAPI phone number for (user_ref, home_id)
   GET    /voice-enable             status check by user_ref query param
@@ -93,6 +106,7 @@ from app.infrastructure.home_assistant.device_registry import (
     HomeUnreachableError,
 )
 from app.infrastructure.home_assistant.direct_dispatcher import HADirectDispatcher
+from app.infrastructure.home_assistant.entity_metadata import HAEntityMetadata
 from app.infrastructure.vapi.vapi_client import VapiClientError
 
 logger = logging.getLogger(__name__)
@@ -176,6 +190,7 @@ class VoiceAuthController(BaseController):
         vapi_provisioning_service: Optional[VapiProvisioningService] = None,
         device_registry: Optional[HADeviceRegistry] = None,
         dashboard_client: Optional[HADashboardClient] = None,
+        entity_metadata: Optional[HAEntityMetadata] = None,
         url_prefix: str = "/api/v1/voice-auth",
     ):
         super().__init__("voice_auth_api", url_prefix)
@@ -186,6 +201,7 @@ class VoiceAuthController(BaseController):
         self._vapi_prov = vapi_provisioning_service
         self._registry = device_registry
         self._dashboards = dashboard_client
+        self._entity_meta = entity_metadata
         self._register_routes()
 
     def _register_routes(self) -> None:
@@ -196,6 +212,7 @@ class VoiceAuthController(BaseController):
         bp.add_url_rule("/enrollments/<enrollment_id>", "delete_enrollment", self.delete_enrollment, methods=["DELETE"])
         bp.add_url_rule("/enrollments/<enrollment_id>/status", "update_status", self.update_status, methods=["PATCH"])
         bp.add_url_rule("/check", "check", self.check, methods=["GET"])
+        bp.add_url_rule("/voice-gated", "list_voice_gated", self.list_voice_gated, methods=["GET"])
 
         bp.add_url_rule("/challenges", "list_challenges", self.list_challenges, methods=["GET"])
         bp.add_url_rule("/challenges/<log_id>", "get_challenge", self.get_challenge, methods=["GET"])
@@ -601,6 +618,103 @@ class VoiceAuthController(BaseController):
             return True, check.enrollment.id
         return False, None
 
+    def list_voice_gated(self):
+        """GET /voice-gated?user_ref=[&home_id=]
+
+        The definitive answer to "which entities answer 409 for this user".
+        Read-only, one call, nothing is fired. Every entity_id listed here
+        WILL return 409 ENROLLMENT_REQUIRED from /automations/trigger and
+        /favorites/{id}/fire; every entity not listed will not.
+
+        home_id is optional: supply it to scope to one home and to get the
+        resolved icon and live name for each row.
+        """
+        user_ref = (request.args.get("user_ref") or "").strip()
+        if not user_ref:
+            return jsonify({
+                "error": "user_ref query param is required",
+                "code": "VALIDATION",
+            }), 400
+        home_id = (request.args.get("home_id") or "").strip() or None
+
+        try:
+            enrollments = self._svc.list_enrollments(user_ref, EnrollmentStatus.ACTIVE)
+        except Exception as e:
+            logger.error(f"list_voice_gated failed user={user_ref}: {e}", exc_info=True)
+            return jsonify({
+                "error": "could not read enrollments",
+                "code": "DEPENDENCY_UNAVAILABLE",
+            }), 503
+
+        if home_id:
+            enrollments = [e for e in enrollments if e.home_id == home_id]
+
+        # Icons/names are a nicety — a caller without a reachable home still
+        # gets the entity_ids, which is the part it cannot work out itself.
+        meta = {}
+        if home_id:
+            entity_ids = [
+                f"{e.ha_service}.{e.ha_entity}"
+                for e in enrollments if e.ha_service and e.ha_entity
+            ]
+            meta = self._tile_metadata(home_id, entity_ids) or {}
+
+        items = []
+        for e in enrollments:
+            entity_id = (
+                f"{e.ha_service}.{e.ha_entity}" if e.ha_service and e.ha_entity else None
+            )
+            row = meta.get(entity_id) or {}
+            items.append({
+                "entity_id": entity_id,
+                # The gate matches on this suffix alone, so any entity ending
+                # in ".<automation_id>" is gated regardless of its domain.
+                "automation_id": e.automation_id,
+                "name": row.get("name") or e.automation_name,
+                "domain": e.ha_service,
+                "icon": row.get("icon"),
+                "home_id": e.home_id,
+                "enrollment_id": e.id,
+                "challenge_type": e.challenge_type.value,
+                "created_by": e.created_by,
+            })
+        items.sort(key=lambda i: (i["entity_id"] or "", i["automation_id"] or ""))
+        return jsonify({
+            "user_ref": user_ref,
+            "home_id": home_id,
+            "count": len(items),
+            "items": items,
+        }), 200
+
+    def _gate_map(self, user_ref: str) -> tuple[dict, bool]:
+        """({automation slug: enrollment_id}, lookup_succeeded) for one user.
+
+        Lets a list endpoint resolve every row's gate from one query. The
+        second element matters on the boards surface: it is the difference
+        between "nothing on this board is gated" and "we could not tell", and
+        only the first is safe to render as a grid of plain buttons.
+        """
+        if not user_ref:
+            return {}, True
+        try:
+            return self._svc.active_gate_map(user_ref), True
+        except Exception as e:
+            logger.warning(f"gate map unavailable user={user_ref}: {e}")
+            return {}, False
+
+    @staticmethod
+    def _gate_lookup(gate_map: dict, entity_id: str) -> Optional[str]:
+        """Enrollment id gating `entity_id`, or None.
+
+        Mirrors the fire path exactly: the key is the entity SUFFIX, so an
+        enrollment on `decorations_on` gates scene.decorations_on and
+        script.decorations_on alike. Advertising anything narrower would
+        promise a tap that then 409s.
+        """
+        if not entity_id or "." not in entity_id:
+            return None
+        return gate_map.get(entity_id.split(".", 1)[1].strip().lower())
+
     def create_favorite(self):
         err = self._require_favorites()
         if err:
@@ -645,10 +759,12 @@ class VoiceAuthController(BaseController):
                 "code": "VALIDATION",
             }), 400
         items = self._favorites.list_favorites(user_ref, home_id)
-        # Annotate each with voice_auth_required (computed via enrollments)
+        # Annotate each with voice_auth_required (computed via enrollments).
+        # One gate query for the whole list, not one per favorite.
+        gate_map, _ = self._gate_map(user_ref)
         out = []
         for f in items:
-            gated, _ = self._is_voice_gated(user_ref, f.entity_id)
+            gated = self._gate_lookup(gate_map, f.entity_id) is not None
             out.append(favorite_to_dict(f, voice_auth_required=gated))
         return jsonify({
             "items": out,
@@ -861,23 +977,22 @@ class VoiceAuthController(BaseController):
             return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
 
         # State map for adding `state` field to results
-        cfg = self._dispatcher._homes.get(home_id)
         states_by_entity: dict = {}
         try:
-            import requests as _rq
-            r = _rq.get(
-                f"{cfg.ha_url.rstrip('/')}/api/states",
-                headers={"Authorization": f"Bearer {cfg.ha_token}"},
-                timeout=8,
-            )
-            if r.status_code == 200:
-                for s in r.json():
-                    states_by_entity[s.get("entity_id", "")] = {
-                        "state": s.get("state"),
-                        "friendly_name": (s.get("attributes") or {}).get("friendly_name"),
-                    }
+            for s in self._registry.get_states(home_id):
+                states_by_entity[s.get("entity_id", "")] = {
+                    "state": s.get("state"),
+                    "friendly_name": (s.get("attributes") or {}).get("friendly_name"),
+                }
         except Exception as e:
             logger.warning(f"search_items: states fetch failed home={home_id}: {e}")
+
+        # Icons, same resolution chain the boards surface uses. Best-effort:
+        # search must still return rows when the metadata fetch fails.
+        icon_meta = self._tile_metadata(home_id, list(states_by_entity)) or {}
+        # Same gate the fire path applies, so a search result can be rendered
+        # as gated without tapping it to find out.
+        gate_map, _ = self._gate_map(user_ref)
 
         # 3. Build candidate items
         items: list = []
@@ -899,6 +1014,8 @@ class VoiceAuthController(BaseController):
                     "model": d.model,
                     "area": d.area,
                     "state": state_info.get("state"),
+                    "icon": (icon_meta.get(primary) or {}).get("icon"),
+                    "voice_gated": self._gate_lookup(gate_map, primary) is not None,
                     "is_favorited": primary in fav_by_entity,
                     "favorite_id": fav_by_entity.get(primary),
                     "_match_blob": " ".join(filter(None, [
@@ -939,6 +1056,8 @@ class VoiceAuthController(BaseController):
                 "model": None,
                 "area": None,
                 "state": info.get("state"),
+                "icon": (icon_meta.get(entity_id) or {}).get("icon"),
+                "voice_gated": self._gate_lookup(gate_map, entity_id) is not None,
                 "is_favorited": entity_id in fav_by_entity,
                 "favorite_id": fav_by_entity.get(entity_id),
                 "_match_blob": (name + " " + entity_id).lower(),
@@ -1003,17 +1122,39 @@ class VoiceAuthController(BaseController):
 
     def get_dashboard_config(self):
         """GET /dashboards/config?user_ref=&home_id=[&url_path=][&include_config=true]
+                                  [&include_categories=][&include_hidden=]
 
         Returns the dashboard's views with the entity_ids each one references
-        — the bits a mobile UI can act on. Card schemas are frontend-specific
-        (custom HACS cards etc.), so the raw Lovelace config is only included
-        when include_config=true. url_path omitted = default Overview.
+        — the bits a mobile UI can act on — plus `entity_meta`, one tile
+        record (name, icon, device_class, entity_category, state,
+        controllable, voice_gated) per entity. Card schemas are
+        frontend-specific (custom HACS cards etc.), so the raw Lovelace config
+        is only included when include_config=true. url_path omitted = default
+        Overview.
+
+        A board tile is a button click: voice-gated entities are withheld by
+        default (listed in gated_excluded) so tapping any tile returned here
+        fires the device rather than answering 409. The gate itself is
+        untouched — a withheld entity still requires the spoken challenge
+        wherever it IS offered, which for a lock is /favorites. Pass
+        include_gated=true to receive them anyway, in which case
+        entity_meta[].voice_gated marks them.
+
+        include_categories filters by HA entity category; default is every
+        category, which is what HA's auto-generated boards hand us and is
+        mostly config/diagnostic clutter. A tile UI wants
+        `include_categories=primary&include_hidden=false`.
         """
         home_id, err = self._dashboard_args()
         if err:
             return err
         url_path = (request.args.get("url_path") or "").strip() or None
         include_config = (request.args.get("include_config") or "").strip().lower() in ("1", "true", "yes")
+        categories, cat_err = self._parse_categories(request.args.get("include_categories"))
+        if cat_err:
+            return cat_err
+        include_hidden = (request.args.get("include_hidden") or "true").strip().lower() not in ("0", "false", "no")
+        include_gated = (request.args.get("include_gated") or "").strip().lower() in ("1", "true", "yes")
         try:
             config = self._dashboards.get_config(home_id, url_path)
         except HomeUnreachableError as ex:
@@ -1053,6 +1194,34 @@ class VoiceAuthController(BaseController):
                     if e not in seen:
                         seen.add(e)
                         all_entities.append(e)
+        # Voice gating is per-user, so this is the one part of a board that
+        # differs between two users of the same home.
+        user_ref = (request.args.get("user_ref") or "").strip()
+        gate_map, gate_ok = self._gate_map(user_ref)
+        gated_excluded: list = []
+
+        meta = self._tile_metadata(home_id, all_entities)
+        if meta is not None:
+            for entity_id, row in meta.items():
+                enrollment_id = self._gate_lookup(gate_map, entity_id)
+                row["voice_gated"] = enrollment_id is not None
+                row["voice_auth_enrollment_id"] = enrollment_id
+            keep = {
+                e for e in all_entities
+                if self._passes_filter(meta.get(e), categories, include_hidden)
+                and (include_gated or not (meta.get(e) or {}).get("voice_gated"))
+            }
+            gated_excluded = [
+                e for e in all_entities
+                if e not in keep and (meta.get(e) or {}).get("voice_gated")
+            ]
+            if len(keep) < len(all_entities):
+                all_entities = [e for e in all_entities if e in keep]
+                for view in views_out:
+                    view["entities"] = [e for e in view["entities"] if e in keep]
+                    view["entity_count"] = len(view["entities"])
+                meta = {e: m for e, m in meta.items() if e in keep}
+
         body = {
             "home_id": home_id,
             "url_path": url_path,
@@ -1062,10 +1231,76 @@ class VoiceAuthController(BaseController):
             "views": views_out,
             "entities": all_entities,
             "entity_count": len(all_entities),
+            "entity_meta": meta or {},
+            # False means HA was reachable enough to give us the board but not
+            # its entity metadata — icons fall back to the client's own map and
+            # include_categories/include_hidden could NOT be applied.
+            "entity_meta_available": meta is not None,
+            # Entities held back because they need voice auth, so every tile
+            # returned is a plain button click. Empty unless the home has
+            # gated devices. Reachable via /favorites, which runs the VAPI flow.
+            "gated_excluded": gated_excluded,
+            # False means the enrollment lookup failed, so gated entities could
+            # NOT be held back and a tap may still answer 409. Keep the handler.
+            "gate_check_available": gate_ok,
         }
         if include_config:
             body["config"] = config
         return jsonify(body), 200
+
+    # ------- entity metadata / tile filtering --------------------------------
+
+    ENTITY_CATEGORIES = ("primary", "config", "diagnostic")
+
+    def _parse_categories(self, raw: Optional[str]):
+        """Parse include_categories -> (set_or_None, error_response).
+
+        None means "no category filter"; that is the default so existing
+        clients keep seeing every entity the board references.
+        """
+        raw = (raw or "").strip().lower()
+        if not raw:
+            return None, None
+        wanted = {c.strip() for c in raw.split(",") if c.strip()}
+        unknown = wanted - set(self.ENTITY_CATEGORIES)
+        if unknown:
+            return None, (jsonify({
+                "error": (
+                    f"unknown include_categories value(s): {', '.join(sorted(unknown))}; "
+                    f"valid: {', '.join(self.ENTITY_CATEGORIES)}"
+                ),
+                "code": "VALIDATION",
+            }), 400)
+        return wanted, None
+
+    @staticmethod
+    def _passes_filter(meta: Optional[dict], categories, include_hidden: bool) -> bool:
+        if meta is None:
+            # No metadata for this entity (it is referenced by a card but not
+            # in HA's registry/states). Keep it — dropping it would silently
+            # lose a tile the board explicitly asks for.
+            return True
+        if not include_hidden and meta.get("hidden"):
+            return False
+        if categories is not None:
+            return (meta.get("entity_category") or "primary") in categories
+        return True
+
+    def _tile_metadata(self, home_id: str, entity_ids: list) -> Optional[dict]:
+        """Tile metadata for `entity_ids`, or None when it cannot be fetched.
+
+        Best-effort by design: the board itself may well be served from cache
+        while HA is briefly down, and a board with fallback icons beats a 503.
+        """
+        if self._entity_meta is None:
+            return None
+        if not entity_ids:
+            return {}
+        try:
+            return self._entity_meta.get(home_id, entity_ids)
+        except Exception as e:
+            logger.warning(f"entity metadata unavailable home={home_id}: {e}")
+            return None
 
     @staticmethod
     def _area_slug(name: str) -> str:

@@ -206,6 +206,24 @@ class VoiceAuthService:
             attempts_remaining=attempts_left,
         )
 
+    def active_gate_map(self, user_ref: str) -> dict[str, str]:
+        """Every automation this user must speak for: {automation slug: enrollment_id}.
+
+        The bulk form of the gate test that /automations/trigger and
+        /favorites/{id}/fire apply one entity at a time, so a screen showing
+        200 tiles can mark the gated ones from a single query instead of 200.
+
+        Deliberately keyed the same way `check` looks up — slugged
+        automation_id, NOT the full entity_id and NOT scoped by home. Anything
+        else would let a tile advertise "not gated" and then get a 409 when
+        tapped. Only ACTIVE enrollments gate; PAUSED and REVOKED do not.
+        """
+        return {
+            _slug(e.automation_id): e.id
+            for e in self._enrollments.list_for_user(user_ref, EnrollmentStatus.ACTIVE)
+            if e.automation_id
+        }
+
     def resolve_for_challenge(
         self, *, user_ref: str, automation_id: str
     ) -> ResolveOutcome:

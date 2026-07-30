@@ -70,3 +70,19 @@ htmlcov/
 !FUTUREPROOFHOME_INTEGRATION.md
 !CHANGES.md
 !docs/ADMIN_API.md
+
+# Local credential scratch files. These hold live Home Assistant long-lived
+# tokens and sk_ios_ device API keys; they were untracked but unignored, one
+# `git add -A` away from a public push. Never commit these.
+HAtoken
+KEY=*
+curl_call.txt
+curlcall.txt
+dashboards_curl_call.txt
+favorites_curl_call.txt
+favoritescall.txt
+signupcall.txt
+scott_server.txt
+scott_manual_json_test.txt
+scott_skill_setup.txt
+test_favorites.sh

@@ -1,10 +1,21 @@
-"""Home Assistant dashboard (Lovelace) client.
+"""Home Assistant frontend client (dashboards, entity registry, icons).
 
-Pulls dashboard definitions from a home's HA over the WebSocket API — the
-only surface HA exposes them on (there is no REST endpoint):
+Pulls what the HA frontend uses to render a dashboard, over the WebSocket API
+— the only surface HA exposes any of it on (there are no REST equivalents):
 
     {"type": "lovelace/dashboards/list"}                 -> extra dashboards
     {"type": "lovelace/config", "url_path": <or null>}   -> one dashboard's config
+    {"type": "config/entity_registry/list"}              -> per-entity platform,
+                                                            translation_key,
+                                                            entity_category, …
+    {"type": "frontend/get_icons", "category": "entity"} -> icons.json icon
+                                                            translations
+
+The last two exist because REST `/api/states` cannot icon a tile on its own:
+since HA 2024.2 integrations declare icons in an `icons.json` translation file
+keyed by the entity's `translation_key`, and REST omits both the key and the
+translations. See app/domain/entity_icons.py for the resolution chain built on
+top of these.
 
 Constraints worth knowing:
 
@@ -106,6 +117,25 @@ def extract_entity_ids(node: Any) -> List[str]:
     return found
 
 
+# Registry rows are fat (~700 bytes each; a 700-entity home ships ~480 KB of
+# JSON, most of it `options` and `categories` we never read). We keep only the
+# fields the icon/tile layer needs before caching.
+_REGISTRY_FIELDS = (
+    "entity_id",
+    "platform",
+    "translation_key",
+    "icon",
+    "original_icon",
+    "device_class",
+    "original_device_class",
+    "entity_category",
+    "hidden_by",
+    "disabled_by",
+    "device_id",
+    "area_id",
+)
+
+
 class HADashboardClient:
     """Per-home cache of HA dashboards, fetched over the WebSocket API."""
 
@@ -114,9 +144,14 @@ class HADashboardClient:
         dispatcher: HADirectDispatcher,
         cache_ttl_seconds: int = 30,
         request_timeout_seconds: float = 10.0,
+        static_cache_ttl_seconds: int = 600,
     ):
         self._dispatcher = dispatcher
         self._ttl = cache_ttl_seconds
+        # The entity registry and icon translations only change when someone
+        # edits HA's configuration, so they get a much longer TTL than the
+        # dashboard configs they decorate.
+        self._static_ttl = static_cache_ttl_seconds
         self._timeout = request_timeout_seconds
         self._cache: Dict[Tuple[str, ...], Tuple[float, Any]] = {}
         self._lock = threading.Lock()
@@ -162,13 +197,58 @@ class HADashboardClient:
             lambda: self._ws_command(home_id, payload),
         )
 
+    def get_entity_registry_and_icons(
+        self, home_id: str, force_refresh: bool = False
+    ) -> Tuple[Dict[str, dict], Dict[str, Any]]:
+        """Return (registry_by_entity_id, icon_resources) for a home.
+
+        Both come back over a single WebSocket connection — connecting and
+        authenticating costs more than either command does, so batching them
+        halves the round trips. Cached together under the static TTL.
+
+        `icon_resources` is keyed by integration, as HA returns it:
+        resources[platform][domain][translation_key] -> {default, state?}.
+        Requesting every loaded integration at once (no `integration` filter)
+        is one small payload (~30 KB) and avoids a call per platform.
+        """
+        return self._cached(
+            ("registry_icons", home_id),
+            force_refresh,
+            lambda: self._fetch_registry_and_icons(home_id),
+            ttl=self._static_ttl,
+        )
+
+    def _fetch_registry_and_icons(self, home_id: str) -> Tuple[Dict[str, dict], Dict[str, Any]]:
+        registry_rows, icons = self._ws_commands(home_id, [
+            {"type": "config/entity_registry/list"},
+            {"type": "frontend/get_icons", "category": "entity"},
+        ])
+        registry: Dict[str, dict] = {}
+        for row in registry_rows or []:
+            entity_id = row.get("entity_id")
+            if entity_id:
+                registry[entity_id] = {k: row.get(k) for k in _REGISTRY_FIELDS}
+        resources = (icons or {}).get("resources") or {}
+        logger.info(
+            f"HADashboardClient: registry+icons home={home_id} "
+            f"entities={len(registry)} integrations={len(resources)}"
+        )
+        return registry, resources
+
     # ------------------------------------------------------------------
 
-    def _cached(self, key: Tuple[str, ...], force_refresh: bool, fetch: Callable[[], Any]) -> Any:
+    def _cached(
+        self,
+        key: Tuple[str, ...],
+        force_refresh: bool,
+        fetch: Callable[[], Any],
+        ttl: Optional[int] = None,
+    ) -> Any:
+        ttl = self._ttl if ttl is None else ttl
         with self._lock:
             cached = self._cache.get(key)
             now = time.monotonic()
-            if not force_refresh and cached and (now - cached[0]) < self._ttl:
+            if not force_refresh and cached and (now - cached[0]) < ttl:
                 return cached[1]
         try:
             value = fetch()
@@ -189,6 +269,18 @@ class HADashboardClient:
         """Open a WebSocket to the home's HA, authenticate, run one command,
         return its `result`. Raises HomeUnreachableError on transport/auth
         failure, Dashboard*Error on an HA-reported command error."""
+        return self._ws_commands(home_id, [payload])[0]
+
+    def _ws_commands(self, home_id: str, payloads: List[Dict[str, Any]]) -> List[Any]:
+        """Run several commands over ONE connection, returning their `result`s
+        in the order given.
+
+        HA's WebSocket API multiplexes on the `id` field, so all commands are
+        sent up front and the replies matched as they arrive — connecting and
+        authenticating dominates the cost of a small command, so this is much
+        cheaper than one connection per command. Errors are raised in command
+        order, so the first failure wins regardless of reply order.
+        """
         cfg = self._dispatcher._homes.get(home_id)
         if not cfg:
             raise HomeUnreachableError(f"no HA config for home '{home_id}'")
@@ -214,13 +306,16 @@ class HADashboardClient:
                     f"orchestrator's access token — the home's token needs to be renewed"
                 )
 
-            msg = dict(payload, id=1)
+            frames: Dict[int, dict] = {}
             try:
-                ws.send(json.dumps(msg))
-                while True:
+                for offset, payload in enumerate(payloads):
+                    ws.send(json.dumps(dict(payload, id=offset + 1)))
+                while len(frames) < len(payloads):
                     frame = json.loads(ws.recv())
-                    if frame.get("id") == 1 and frame.get("type") == "result":
-                        break
+                    # HA interleaves event frames from other subscriptions;
+                    # only `result` frames for our ids count.
+                    if frame.get("type") == "result" and frame.get("id") in range(1, len(payloads) + 1):
+                        frames[frame["id"]] = frame
             except (websocket.WebSocketException, OSError, ValueError) as e:
                 logger.error(f"HADashboardClient: command failed home={home_id}: {e}")
                 raise HomeUnreachableError(
@@ -233,6 +328,11 @@ class HADashboardClient:
                 except Exception:
                     pass
 
+        return [self._unwrap(frames[i + 1]) for i in range(len(payloads))]
+
+    @staticmethod
+    def _unwrap(frame: dict) -> Any:
+        """Return a result frame's payload, or raise the mapped HA error."""
         if frame.get("success"):
             return frame.get("result")
 
