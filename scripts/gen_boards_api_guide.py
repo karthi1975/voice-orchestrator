@@ -27,7 +27,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-VERSION = "1.2"
+VERSION = "1.3"
 DATE = "July 30, 2026"
 OUT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -164,7 +164,7 @@ def build():
              "board detail screen, and tapping a tile to control a device.", "subtitle"))
     one(para(f"Version {VERSION} &nbsp;|&nbsp; {DATE} &nbsp;|&nbsp; Tetradapt", "meta"))
     add(note(
-        "<b>What changed in 1.2.</b> "
+        "<b>What changed in 1.3.</b> New §8 is a run book: every call you need, with real output captured from production, including how to prove the 409 path without touching the house. <b>1.2:</b> "
         "<font face='Courier' size='8'>/dashboards/config</font> now returns "
         "<font face='Courier' size='8'>entity_meta</font> — a per-entity record with the "
         "real Home Assistant icon, display name, category, live state and whether the tile is "
@@ -689,6 +689,167 @@ curl -s -X POST "$BASE/automations/trigger" -H "Authorization: Bearer $KEY" \\
              "<font face='Courier' size='8'>entity_meta[].state</font>, so the tile model "
              "should carry it from the start. Still out of scope for this milestone: per-user "
              "board memory synced across devices."))
+
+    # ---- 8. Run book -------------------------------------------------------
+    one(CondPageBreak(3.2 * inch))
+    add(h1("8. Run book — verified curl calls"))
+    one(para("Every call in this section was run against production on 30 July 2026 and the "
+             "output below is copied verbatim, not illustrative. Paste the exports first; "
+             "everything after reuses them."))
+    add(code("""
+export KEY=sk_ios_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX      # your device key
+export BASE=https://voiceorchestrator.homeadapt.us/api/v1/voice-auth
+export U=scott_mobile
+export H=scott_home
+export Q="user_ref=$U&home_id=$H&include_categories=primary&include_hidden=false"
+"""))
+    add(table([
+        ["#", "What it answers", "Expect", "Touches the house?"],
+        ["1", "Which entities return 409", "200", "no"],
+        ["2", "The board call for the tile screen", "200", "no"],
+        ["3", "One view's tiles", "200", "no"],
+        ["4", "What icon do I use for this entity", "200", "no"],
+        ["5", "Search row shape", "200", "no"],
+        ["6", "Favorites (where a lock appears)", "200", "no"],
+        ["7", "Prove the 409 path", "<b>409</b>", "no — fake home_id"],
+        ["8", "Control for #7", "<b>502</b>", "no — fake home_id"],
+        ["9", "Fire a device for real", "200", "<b>YES — toggles a light</b>"],
+    ], widths=[0.3, 3.1, 0.7, 2.8]))
+
+    one(h2("1 · Which entities return 409"))
+    add(code("""
+curl -s "$BASE/voice-gated?user_ref=$U&home_id=$H" -H "Authorization: Bearer $KEY" | jq
+
+{ "count": 5, "home_id": "scott_home", "user_ref": "scott_mobile", "items": [
+    { "entity_id": "lock.yale_yrd226_tsdb",  "automation_id": "yale_yrd226_tsdb",
+      "name": "Yale Lock",      "domain": "lock",  "icon": "mdi:lock",
+      "challenge_type": "STEP_UP",      "created_by": "favorite_auto_lock",
+      "enrollment_id": "9c520ce7-bdb5-4143-8e59-091b0626bdf5", "home_id": "scott_home" },
+    { "entity_id": "scene.decorations_on",   "automation_id": "decorations_on",
+      "name": "Decorations On", "domain": "scene", "icon": "mdi:string-lights",
+      "challenge_type": "VERIFICATION", "created_by": "seed",
+      "enrollment_id": "21e86f28-0037-40a9-94fe-cbdfa9fc6d07", "home_id": "scott_home" }
+    ...  scene.decorations_off, script.main_lights_off, script.main_lights_on
+] }
+"""))
+
+    one(h2("2 · The board call — use this for the tile screen"))
+    add(code("""
+curl -s "$BASE/dashboards/config?$Q" -H "Authorization: Bearer $KEY" \\
+  | jq '{tiles:.entity_count, excluded:.gated_excluded}'
+
+{ "tiles": 108, "excluded": [ "lock.yale_yrd226_tsdb" ] }
+"""))
+    one(para("Without the two parameters that board is 203 entities. The lock is withheld, so "
+             "every one of the 108 tiles can be tapped and will fire."))
+
+    one(h2("3 · One view's tiles"))
+    add(code("""
+curl -s "$BASE/dashboards/config?$Q" -H "Authorization: Bearer $KEY" \\
+  | jq '.views[] | select(.title=="Deck")'
+
+{ "title": "Deck", "path": "deck", "icon": null,
+  "entity_count": 1, "entities": [ "switch.deck_light" ] }
+"""))
+    one(para("One tile, not the nine HA's auto-generated board lists for that plug."))
+
+    one(h2("4 · What icon do I use for this entity"))
+    add(code("""
+curl -s "$BASE/dashboards/config?user_ref=$U&home_id=$H" \\
+  -H "Authorization: Bearer $KEY" | jq '.entity_meta["sensor.deck_light_signal_level"]'
+
+{ "name": "Deck light Signal level", "domain": "sensor",
+  "icon": "mdi:signal",            "icon_source": "translation",
+  "device_class": null,            "unit_of_measurement": null,
+  "entity_category": "diagnostic", "hidden": false,
+  "state": "2",                    "controllable": false,
+  "voice_gated": false,            "voice_auth_enrollment_id": null }
+"""))
+    one(para("Note this call omits the filters on purpose — that entity is "
+             "<font face='Courier' size='8'>diagnostic</font>, so the board in #2 does not "
+             "return it. Its icon exists only in HA's icon translations, which is why it "
+             "looks blank over REST."))
+
+    one(h2("5 · Search row shape"))
+    add(code("""
+curl -s "$BASE/items/search?home_id=$H&user_ref=$U&limit=500" \\
+  -H "Authorization: Bearer $KEY" | jq '.items[0]'
+
+{ "entity_id": "media_player.lg_webos_tv_ut7000pua", "kind": "device",
+  "name": "[LG] webOS TV UT7000PUA", "domain": "media_player",
+  "icon": "mdi:television",  "state": "unavailable",  "voice_gated": false,
+  "manufacturer": "LGE", "model": "43UT7000PUA.BUSFLJM", "area": null,
+  "device_id": "b4a39663fb71d1d04c9ea9491c35cf6e",
+  "is_favorited": false, "favorite_id": null }
+"""))
+
+    one(h2("6 · Favorites"))
+    add(code("""
+curl -s "$BASE/favorites?user_ref=$U&home_id=$H" -H "Authorization: Bearer $KEY" | jq
+
+{ "count": 2, "items": [
+    { "entity_id": "switch.bat_sign",     "friendly_name": "Bat Sign",
+      "domain": "switch", "kind": "device", "position": 0,
+      "voice_auth_required": false, "id": "de013682-b4c8-47fa-b409-34f16202955e" },
+    { "entity_id": "light.man_land_lamp", "friendly_name": "Man Land Lamp",
+      "domain": "light",  "kind": "device", "position": 1,
+      "voice_auth_required": false, "id": "8f9e2b24-4be3-44cb-a248-572924ea04f2" }
+] }
+"""))
+
+    one(h2("7 · Prove the 409 path — without touching the house"))
+    one(para("The gate is evaluated before the command is dispatched and never reads "
+             "<font face='Courier' size='8'>home_id</font>, so a home that does not exist "
+             "proves the 409 while making it impossible for anything to reach a real device."))
+    add(code("""
+curl -s -X POST "$BASE/automations/trigger" \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"home_id":"__no_such_home__","ha_service":"lock","ha_entity":"yale_yrd226_tsdb",
+       "user_ref":"scott_mobile","automation_id":"yale_yrd226_tsdb"}' \\
+  -w "\\nHTTP %{http_code}\\n"
+
+{"code":"ENROLLMENT_REQUIRED",
+ "enrollment_id":"9c520ce7-bdb5-4143-8e59-091b0626bdf5",
+ "error":"this automation requires voice authentication"}
+
+HTTP 409
+"""))
+
+    one(h2("8 · Control — the same call on an ungated entity"))
+    add(code("""
+curl -s -X POST "$BASE/automations/trigger" \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"home_id":"__no_such_home__","ha_service":"scene","ha_entity":"good_night",
+       "user_ref":"scott_mobile","automation_id":"good_night"}' \\
+  -w "\\nHTTP %{http_code}\\n"
+
+error code: 502
+
+HTTP 502
+"""))
+    one(para("502, not 409 — the gate correctly declined to fire and the call fell through to "
+             "dispatch against the nonexistent home. That is what proves the 409 in #7 came "
+             "from the voice gate and not from the bad "
+             "<font face='Courier' size='8'>home_id</font>. Swap in the real "
+             "<font face='Courier' size='8'>home_id</font> when you want the live path; the "
+             "gate result is identical because it does not read that field."))
+
+    one(h2("9 · Fire a device for real"))
+    add(note("<b>This one controls the house.</b> It toggles a light, not the lock. Run it "
+             "when you are ready to see a tile tap work end to end."))
+    add(code("""
+curl -s -X POST "$BASE/automations/trigger" \\
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\
+  -d '{"home_id":"scott_home","ha_service":"switch","ha_entity":"deck_light",
+       "user_ref":"scott_mobile","automation_id":"deck_light"}'
+
+{"success":true,"message":"ok","status_code":200,"latency_ms":309}
+"""))
+    one(para("That is exactly what a tile tap sends: the entity ID split on the first dot into "
+             "<font face='Courier' size='8'>ha_service</font> and "
+             "<font face='Courier' size='8'>ha_entity</font>, with "
+             "<font face='Courier' size='8'>user_ref</font> and "
+             "<font face='Courier' size='8'>automation_id</font> so the gate can be enforced."))
 
     doc = SimpleDocTemplate(
         OUT, pagesize=letter,
