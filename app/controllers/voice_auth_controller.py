@@ -222,6 +222,7 @@ class VoiceAuthController(BaseController):
         bp.add_url_rule("/phone-mappings/<mapping_id>", "delete_phone_mapping", self.delete_phone_mapping, methods=["DELETE"])
         bp.add_url_rule("/phone-lookup", "phone_lookup", self.phone_lookup, methods=["GET"])
 
+        bp.add_url_rule("/automations", "list_automations", self.list_automations, methods=["GET"])
         bp.add_url_rule("/automations/discover", "discover_automations", self.discover_automations, methods=["GET"])
         bp.add_url_rule("/automations/trigger", "trigger_automation", self.trigger_automation, methods=["POST"])
 
@@ -426,6 +427,119 @@ class VoiceAuthController(BaseController):
 
     # ------- discover HA items -----------------------------------------------
 
+    def list_automations(self):
+        """GET /automations?user_ref=&home_id=[&q=][&enabled=][&limit=]
+
+        Every HA automation in a home — the actual `automation.*` entities,
+        unlike /automations/discover, which returns voice-ELIGIBLE candidates
+        (scenes/scripts/devices) and skips this domain entirely.
+
+        Automations are HOME-scoped in HA (we authenticate with the home's
+        long-lived token), so every user of a home sees the same list;
+        user_ref is required for auth-middleware parity and to resolve the
+        per-user bits: voice_gated and is_favorited.
+
+        Per row:
+          enabled          state == "on". Toggle with POST /automations/trigger
+                           + action turn_on/turn_off; run now with the default
+                           action (trigger).
+          ha_automation_id HA's own config id (attributes.id) — what the HA UI
+                           uses in its editor/trace URLs. Null for YAML-defined
+                           automations.
+          automation_id    the entity suffix — the id the voice-gate and
+                           enrollment APIs key on.
+          is_running       current > 0 (an instance is executing right now).
+
+        Filters: q (case-insensitive substring on name + entity_id),
+        enabled=true|false, limit (default 200, max 500).
+        """
+        if self._registry is None:
+            return jsonify({
+                "error": "device registry not configured",
+                "code": "NOT_CONFIGURED",
+            }), 503
+        user_ref = request.args.get("user_ref", "").strip()
+        home_id = request.args.get("home_id", "").strip()
+        if not user_ref or not home_id:
+            return jsonify({
+                "error": "user_ref and home_id query params are required",
+                "code": "VALIDATION",
+            }), 400
+        if not self._dispatcher.has_home(home_id):
+            return jsonify({"error": f"home '{home_id}' not configured", "code": "NOT_CONFIGURED"}), 404
+
+        q = (request.args.get("q") or "").strip().lower()
+        enabled_raw = (request.args.get("enabled") or "").strip().lower()
+        enabled_filter = None
+        if enabled_raw in ("1", "true", "yes"):
+            enabled_filter = True
+        elif enabled_raw in ("0", "false", "no"):
+            enabled_filter = False
+        try:
+            limit = min(int(request.args.get("limit", "200")), 500)
+        except ValueError:
+            limit = 200
+
+        try:
+            states = self._registry.get_states(home_id)
+        except HomeUnreachableError as ex:
+            return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
+
+        autos = [
+            s for s in states
+            if (s.get("entity_id") or "").startswith("automation.")
+        ]
+
+        # Icons via the boards resolution chain; best-effort like everywhere
+        # else on the mobile surface.
+        icon_meta = self._tile_metadata(home_id, [s["entity_id"] for s in autos]) or {}
+        gate_map, gate_ok = self._gate_map(user_ref)
+        fav_by_entity: dict = {}
+        if self._favorites is not None:
+            for f in self._favorites.list_favorites(user_ref, home_id):
+                fav_by_entity[f.entity_id] = f.id
+
+        items = []
+        for s in autos:
+            entity_id = s["entity_id"]
+            attrs = s.get("attributes") or {}
+            suffix = entity_id.split(".", 1)[1]
+            enabled = s.get("state") == "on"
+            if enabled_filter is not None and enabled != enabled_filter:
+                continue
+            name = attrs.get("friendly_name") or suffix
+            if q and q not in (name + " " + entity_id).lower():
+                continue
+            enrollment_id = self._gate_lookup(gate_map, entity_id)
+            items.append({
+                "entity_id": entity_id,
+                "automation_id": suffix,
+                "ha_automation_id": attrs.get("id"),
+                "name": name,
+                "enabled": enabled,
+                "state": s.get("state"),
+                "last_triggered": attrs.get("last_triggered"),
+                "mode": attrs.get("mode"),
+                "is_running": bool(attrs.get("current")),
+                "icon": (icon_meta.get(entity_id) or {}).get("icon"),
+                "voice_gated": enrollment_id is not None,
+                "voice_auth_enrollment_id": enrollment_id,
+                "is_favorited": entity_id in fav_by_entity,
+                "favorite_id": fav_by_entity.get(entity_id),
+            })
+        items.sort(key=lambda i: (i["name"] or "").lower())
+        items = items[:limit]
+
+        return jsonify({
+            "home_id": home_id,
+            "count": len(items),
+            "items": items,
+            # Same meaning as on /dashboards/config: False = the enrollment
+            # lookup failed, voice_gated flags default to False and a tap on a
+            # gated automation may still answer 409.
+            "gate_check_available": gate_ok,
+        }), 200
+
     def discover_automations(self):
         """Query a home's HA REST API and return voice-eligible candidates.
 
@@ -480,6 +594,10 @@ class VoiceAuthController(BaseController):
         If an active enrollment exists for (user_ref, automation_id), refuses with
         409 ENROLLMENT_REQUIRED — voice-gated automations cannot be bypassed via
         this endpoint. The caller must take the VAPI challenge path instead.
+
+        Body `action` (optional) overrides the per-domain default the same way
+        /favorites/{id}/fire does — for the automation domain: omitted =
+        `trigger` (run it now); `turn_on`/`turn_off` = enable/disable.
         """
         body = request.get_json(silent=True) or {}
         home_id = (body.get("home_id") or "").strip()
@@ -487,6 +605,7 @@ class VoiceAuthController(BaseController):
         ha_entity = (body.get("ha_entity") or "").strip()
         user_ref = (body.get("user_ref") or "").strip()
         automation_id = (body.get("automation_id") or "").strip()
+        action = (body.get("action") or "").strip() or None
 
         if not home_id or not ha_service or not ha_entity:
             return jsonify({
@@ -510,7 +629,7 @@ class VoiceAuthController(BaseController):
                     "enrollment_id": check.enrollment.id,
                 }), 409
 
-        result = self._dispatcher.dispatch_direct(home_id, ha_service, ha_entity)
+        result = self._dispatcher.dispatch_direct(home_id, ha_service, ha_entity, action=action)
         status = 200 if result.success else 502
         return jsonify({
             "success": result.success,
