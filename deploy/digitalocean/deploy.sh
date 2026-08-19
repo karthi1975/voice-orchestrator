@@ -5,6 +5,11 @@ set -e
 
 APP_DIR="/opt/voice-orchestrator"
 DOCKER_IMAGE="voice-orchestrator:latest"
+# The Postgres container (voice-orchestrator-db) lives on the old compose
+# network; DATABASE_URL's hostname only resolves for containers attached to
+# it. Without this, the migration step kills the deploy AFTER the app
+# container has been stopped, leaving the service down.
+DOCKER_NETWORK="voice-orchestrator_default"
 
 echo "=== Voice Orchestrator - Deployment ==="
 
@@ -28,6 +33,7 @@ docker rm voice-orchestrator || true
 if grep -q "USE_DATABASE=true" .env; then
     echo "Running database migrations..."
     docker run --rm \
+        --network $DOCKER_NETWORK \
         --env-file .env \
         $DOCKER_IMAGE \
         python -m alembic upgrade head
@@ -38,6 +44,7 @@ echo "Starting application container..."
 docker run -d \
     --name voice-orchestrator \
     --restart unless-stopped \
+    --network $DOCKER_NETWORK \
     -p 127.0.0.1:6500:6500 \
     --env-file .env \
     --health-cmd="curl -f http://localhost:6500/health || exit 1" \
