@@ -617,6 +617,16 @@ class VoiceAuthController(BaseController):
                 "error": "ha_entity is the entity suffix only (e.g. 'decorations_on'), not 'script.decorations_on'",
                 "code": "VALIDATION",
             }), 400
+        # entity_id is built as "{ha_service}.{ha_entity}", so HA's generic
+        # homeassistant/* services would target a nonexistent entity and
+        # silently no-op with a 200. Refuse loudly instead.
+        if ha_service == "homeassistant":
+            return jsonify({
+                "error": "use the entity's own domain as ha_service (e.g. 'light', 'switch') — "
+                         "'homeassistant' would form the invalid entity_id 'homeassistant.<entity>' "
+                         "and Home Assistant silently ignores it",
+                "code": "VALIDATION",
+            }), 400
 
         # Voice-gate guard: if (user_ref, automation_id) supplied AND an active
         # enrollment exists, refuse — caller must use the VAPI flow.

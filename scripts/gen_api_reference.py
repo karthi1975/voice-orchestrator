@@ -26,7 +26,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-VERSION = "1.1"
+VERSION = "1.2"
 DATE = "August 20, 2026"
 OUT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -168,16 +168,18 @@ def build():
     one(para(f"Version {VERSION} &nbsp;|&nbsp; {DATE} &nbsp;|&nbsp; Tetradapt "
              "&nbsp;|&nbsp; everything verified in production", "meta"))
     add(note(
-        "<b>What changed in 1.1 (August 2026).</b> New §6: "
-        f"{mono('GET /automations')} lists every Home Assistant automation in a home "
-        "(name, enabled, last_triggered, gate + favorite flags) — this is the automations "
-        f"pull for the mobile app. {mono('POST /automations/trigger')} now takes an optional "
-        f"{mono('action')} — {mono('toggle')} / {mono('turn_on')} / {mono('turn_off')} — so "
-        "on/off devices can actually be turned OFF (a bare trigger always meant turn_on "
-        "before; this was the boards-page “can't turn the lamp off” bug). "
-        f"{mono('POST /favorites/{id}/fire')} accepts the same override. New §7 indexes the "
-        "boards endpoints, which v1.0 predated — the deep dive stays in "
-        "boards_api_guide.pdf."))
+        "<b>What changed in 1.2.</b> §6's action matrix now covers EVERY domain, verified "
+        "against the home's own HA service registry: toggle/turn_on/turn_off work for "
+        "lights, switches, fans, covers, media players, remotes, scripts, climate and "
+        "input_booleans — not just automations — plus a copy-paste test recipe. "
+        "<b>1.1:</b> new §6 — "
+        f"{mono('GET /automations')} lists every HA automation in a home (the automations "
+        f"pull for the mobile app), and {mono('POST /automations/trigger')} takes an "
+        f"optional {mono('action')} ({mono('toggle')} / {mono('turn_on')} / "
+        f"{mono('turn_off')}) so on/off devices can actually be turned OFF — the "
+        "boards-page “can't turn the lamp off” bug. "
+        f"{mono('POST /favorites/{id}/fire')} accepts the same override. New §7 indexes "
+        "the boards endpoints (deep dive: boards_api_guide.pdf)."))
 
     # ---- basics ------------------------------------------------------------
     add(h1("Basics"))
@@ -401,13 +403,14 @@ def build():
     one(para("Errors: 400 VALIDATION (missing params) · 404 NOT_CONFIGURED (unknown home) · "
              "503 HOME_UNREACHABLE (HA down, nothing cached)."))
 
-    one(h2("POST /automations/trigger — run / toggle / turn on / turn off"))
-    one(para("Fires POST /api/services/{ha_service}/{action} on the home's HA. "
-             f"{mono('action')} is optional — omitted, the server picks the per-domain "
-             "default. If an ACTIVE enrollment exists for (user_ref, automation_id) the "
-             "call refuses with 409 ENROLLMENT_REQUIRED regardless of action — route to "
-             "VAPI. user_ref + automation_id are required for that gate check; omitting "
-             "them bypasses it (only for clearly unprotected items)."))
+    one(h2("POST /automations/trigger — run / toggle / turn on / turn off ANY domain"))
+    one(para("The name is historical — this endpoint controls every entity domain, not "
+             "just automations. It fires POST /api/services/{ha_service}/{action} on the "
+             f"home's HA. {mono('action')} is optional — omitted, the server picks the "
+             "per-domain default. If an ACTIVE enrollment exists for (user_ref, "
+             "automation_id) the call refuses with 409 ENROLLMENT_REQUIRED regardless of "
+             "action — route to VAPI. user_ref + automation_id are required for that gate "
+             "check; omitting them bypasses it (only for clearly unprotected items)."))
     add(code('# run an automation now (automation domain default = trigger):\n'
              'curl -s -X POST "$BASE/automations/trigger" -H "Authorization: Bearer $TOKEN" \\\n'
              '  -H "Content-Type: application/json" -d \'{\n'
@@ -426,21 +429,67 @@ def build():
              '        "action": "turn_off"   # or "turn_on"\n'
              '\n'
              '200: {"success": true, "message": "ok", "status_code": 200, "latency_ms": 214}'))
+    one(h2("Action matrix — every domain (verified against HA's service registry, Aug 20 2026)"))
     add(table([
-        ["Domain", "Default action (no `action` sent)", "Toggle supported?"],
-        ["automation", "trigger (runs it; turn_on only ENABLES it)", "turn_on/turn_off = enable/disable"],
-        ["lock", "unlock (always voice-gated via favorites)", "no — use lock / unlock"],
-        ["light, switch, fan, cover, media_player, input_boolean", "turn_on", "yes — send toggle"],
-        ["scene, script, everything else", "turn_on", "n/a"],
-    ], [1.9, 2.7, 2.3], code_cols=(0,)))
+        ["Domain", "Default action (no `action` sent)", "toggle", "turn_on / turn_off"],
+        ["light, switch, fan, cover, media_player, remote, input_boolean",
+         "turn_on", "✓ (LIVE-verified: light, switch)", "✓"],
+        ["script", "turn_on (runs it)", "✓ (toggle STOPS a running script)", "✓"],
+        ["climate", "turn_on", "✓ — flips real HVAC power; avoid on casual tiles", "✓"],
+        ["automation", "trigger (RUNS it)", "✓ but = enable/disable, NOT run", "✓ = enable / disable"],
+        ["scene", "turn_on", "—", "turn_on only (a scene can't be “off”)"],
+        ["lock", "unlock (always voice-gated via favorites)", "—", "— use action lock / unlock"],
+    ], [1.7, 1.7, 1.9, 1.6], code_cols=(0,)))
+    one(h2("The generic toggle call — one template, every on/off domain"))
+    one(para(f"{mono('ha_service')} is always the entity's own domain (the part before "
+             f"the dot in its entity_id) and {mono('ha_entity')} the part after it — "
+             "split light.man_land_lamp and you have the whole call:"))
+    add(code('curl -s -X POST "$BASE/automations/trigger" \\\n'
+             '  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\\n'
+             '  -d \'{\n'
+             '    "home_id":       "scott_home",\n'
+             '    "ha_service":    "light",           # entity domain: light|switch|fan|media_player|…\n'
+             '    "ha_entity":     "man_land_lamp",   # entity suffix (no dot)\n'
+             '    "user_ref":      "scott_mobile",\n'
+             '    "automation_id": "man_land_lamp",   # same suffix — enables the 409 gate check\n'
+             '    "action":        "toggle"           # or turn_on / turn_off\n'
+             '  }\'\n'
+             '\n'
+             '200: {"success": true, "message": "ok", "status_code": 200, "latency_ms": 173}'))
+    one(para(f"Do NOT send {mono('ha_service: homeassistant')} — the API refuses it with "
+             "400 (entity_id is assembled as ha_service.ha_entity, so HA's generic domain "
+             "would target a nonexistent homeassistant.* entity, which HA 200-OKs and "
+             "silently ignores). Live-verified end-to-end in production: "
+             "light.man_land_lamp and switch.bat_sign, each on → toggle → off → toggle → "
+             "on; the other domains are confirmed by the home HA's own /api/services "
+             "registry (climate, media_player, remote were deliberately not live-fired — "
+             "real HVAC and TVs)."))
     add(note(
         "<b>Why toggle exists.</b> The default for a light is turn_on, so a bare trigger "
         "call can never turn anything OFF — that was the boards-page “Man Land Lamp won't "
         "turn off” bug. On/off tiles must send "
         f"{mono('action:&nbsp;toggle')} and let HA resolve the flip from its own live "
-        "state (immune to a stale UI). Verified in production on light.man_land_lamp: "
-        "on → toggle → off → toggle → on. When checking the result, remember reads go "
-        "through a ~10s state cache."))
+        "state (immune to a stale UI). When checking the result, remember reads go "
+        "through a ~10s state cache — wait ~12s before re-reading."))
+    one(h2("Test recipe — prove toggle/on/off on any domain from a terminal"))
+    add(code('fire() {  # fire <domain> <entity-suffix> <action>\n'
+             '  curl -s -X POST "$BASE/automations/trigger" \\\n'
+             '    -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \\\n'
+             '    -d "{\\"home_id\\":\\"$HOME_ID\\",\\"ha_service\\":\\"$1\\",\\"ha_entity\\":\\"$2\\",\n'
+             '         \\"user_ref\\":\\"$USER_REF\\",\\"automation_id\\":\\"$2\\",\\"action\\":\\"$3\\"}"; }\n'
+             'state() {  # current state of anything matching $1\n'
+             '  curl -s -H "Authorization: Bearer $KEY" \\\n'
+             '    "$BASE/items/search?user_ref=$USER_REF&home_id=$HOME_ID&q=$1"; }\n'
+             '\n'
+             'state man_land_lamp              # note the state\n'
+             'fire light man_land_lamp toggle  # {"success": true, ...}\n'
+             'sleep 12; state man_land_lamp    # state flipped\n'
+             'fire light man_land_lamp toggle  # flip it back\n'
+             '\n'
+             'fire switch bat_sign turn_off    # explicit off\n'
+             'fire switch bat_sign turn_on     # explicit on\n'
+             'fire automation lights_off_at_night turn_off   # DISABLE the automation\n'
+             'fire automation lights_off_at_night turn_on    # re-enable it'))
 
     # ---- 7 boards ----------------------------------------------------------
     add(h1("7 · Boards (HA dashboards as tap-to-control tiles)"))

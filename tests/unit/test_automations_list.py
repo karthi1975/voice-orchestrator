@@ -235,3 +235,15 @@ class TestTriggerAutomationAction:
         })
         assert r.status_code == 200
         dispatch.assert_called_once_with("h1", "automation", "wake_up_morning", action="turn_off")
+
+    def test_homeassistant_domain_rejected_not_silently_ignored(self, dispatcher):
+        # entity_id is built as "{service}.{entity}", so ha_service
+        # "homeassistant" would target homeassistant.<entity> — which HA
+        # 200-OKs and ignores. The API must refuse rather than fake success.
+        r, dispatch = self._fire(dispatcher, {
+            "home_id": "h1", "ha_service": "homeassistant", "ha_entity": "man_land_lamp",
+            "action": "toggle",
+        })
+        assert r.status_code == 400
+        assert r.get_json()["code"] == "VALIDATION"
+        dispatch.assert_not_called()
