@@ -471,6 +471,26 @@ def build():
         f"{mono('action:&nbsp;toggle')} and let HA resolve the flip from its own live "
         "state (immune to a stale UI). When checking the result, remember reads go "
         "through a ~10s state cache — wait ~12s before re-reading."))
+    one(h2("Copy-paste test — no variables, run exactly as printed (verified Aug 20, 2026)"))
+    one(para("Everything inline (production URL + the iOS platform key), so it runs from "
+             "any terminal as-is. JSON has no comments — don't paste annotated bodies. "
+             "Toggles Man Land Lamp (Downstairs Bat Cave) off and back on:"))
+    add(code('# 1. flip the lamp (toggle = whatever it is now, becomes the opposite):\n'
+             'curl -s -X POST "https://voiceorchestrator.homeadapt.us/api/v1/voice-auth/automations/trigger" \\\n'
+             '  -H "Authorization: Bearer sk_ios_48b546d143dae04ec9d2c4396ae9155648e80a5ffbaf3377" \\\n'
+             '  -H "Content-Type: application/json" \\\n'
+             '  -d \'{"home_id":"scott_home","ha_service":"light","ha_entity":"man_land_lamp",\n'
+             '       "user_ref":"scott_mobile","automation_id":"man_land_lamp","action":"toggle"}\'\n'
+             '# -> {"latency_ms":474,"message":"ok","status_code":200,"success":true}\n'
+             '\n'
+             '# 2. confirm the state — WAIT ~12s first (reads come from a 10s cache):\n'
+             'sleep 12; curl -s "https://voiceorchestrator.homeadapt.us/api/v1/voice-auth/items/search?user_ref=scott_mobile&home_id=scott_home&q=man_land_lamp" \\\n'
+             '  -H "Authorization: Bearer sk_ios_48b546d143dae04ec9d2c4396ae9155648e80a5ffbaf3377"\n'
+             '# -> ... "name":"Man Land Lamp","state":"off" ...\n'
+             '\n'
+             '# 3. run step 1 again to flip it back on (leave it as you found it).\n'
+             '# Guaranteed direction instead of a flip: "action":"turn_off" or "turn_on"\n'
+             '# (idempotent - safe to repeat when you don\'t know the current state).'))
     one(h2("Test recipe — prove toggle/on/off on any domain from a terminal"))
     add(code('fire() {  # fire <domain> <entity-suffix> <action>\n'
              '  curl -s -X POST "$BASE/automations/trigger" \\\n'
