@@ -94,6 +94,7 @@
   .tile .tname { font-weight: 600; line-height: 1.25; }
   .tile .tdom { color: #8ea0c6; font-size: 12px; text-transform: capitalize; }
   .tile.fired { border-color: rgba(93,254,202,0.6); background: rgba(93,254,202,0.10); }
+  .tile.ison { border-color: rgba(255,214,90,0.5); background: rgba(255,214,90,0.08); }
   .tile.gated { border-color: rgba(255,196,0,0.45); }
   .tile.sensor { opacity: 0.55; cursor: default; }
   .stale .tile { opacity: 0.45; pointer-events: none; }
@@ -131,6 +132,10 @@ const EMOJI = { light:"💡", switch:"🔌", lock:"🔒", cover:"🪟", climate:
   media_player:"🔊", scene:"🎬", script:"📜", automation:"⚙️", camera:"📷",
   sensor:"📈", binary_sensor:"🚪", vacuum:"🧹", button:"🔘", input_boolean:"🎚️" };
 const SENSOR_ONLY = new Set(["sensor", "binary_sensor", "camera", "device_tracker", "update", "event", "sun", "zone", "person", "weather"]);
+// Domains where a tile means on/off, so a tap must TOGGLE — the server's
+// per-domain default is turn_on, which can never turn anything off.
+// Scenes/scripts/automations/locks keep the default (activate/trigger/unlock).
+const TOGGLEABLE = new Set(["light", "switch", "fan", "input_boolean", "cover", "media_player"]);
 
 const el = (id) => document.getElementById(id);
 const screen = el("screen"), banner = el("banner");
@@ -221,10 +226,13 @@ async function showBoard(dash, viewPath) {
     </div>
     <div class="grid ${stale ? "stale" : ""}">${active.entities.map((e) => {
       const dom = e.split(".")[0], sensor = SENSOR_ONLY.has(dom);
-      return `<button class="tile ${sensor ? "sensor" : ""}" data-e="${e}">
+      const m = (cfg.entity_meta || {})[e] || {};
+      const isOn = TOGGLEABLE.has(dom) && m.state === "on";
+      const stateTxt = TOGGLEABLE.has(dom) && m.state ? " · " + m.state : "";
+      return `<button class="tile ${sensor ? "sensor" : ""}${isOn ? " ison" : ""}" data-e="${e}">
         <span class="emoji">${EMOJI[dom] || "🔘"}</span>
-        <span class="tname">${pretty(e)}</span>
-        <span class="tdom">${dom.replace("_", " ")}</span>
+        <span class="tname">${m.name || pretty(e)}</span>
+        <span class="tdom">${dom.replace("_", " ")}${stateTxt}</span>
       </button>`; }).join("")}
     </div>`;
 
@@ -234,6 +242,8 @@ async function showBoard(dash, viewPath) {
 
 async function fire(tile) {
   const entity = tile.dataset.e, [dom, suffix] = entity.split(".");
+  const toggle = TOGGLEABLE.has(dom);
+  const name = tile.querySelector(".tname")?.textContent || pretty(entity);
   tile.classList.add("fired");
   try {
     const c = store.cfg;
@@ -241,16 +251,24 @@ async function fire(tile) {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + c.key },
       body: JSON.stringify({ home_id: c.home, ha_service: dom, ha_entity: suffix,
-                             user_ref: c.user, automation_id: suffix }),
+                             user_ref: c.user, automation_id: suffix,
+                             ...(toggle ? { action: "toggle" } : {}) }),
     });
     const body = await r.json().catch(() => ({}));
     if (r.status === 409 && body.code === "ENROLLMENT_REQUIRED") {
       tile.classList.add("gated");
-      note("🎤 " + pretty(entity) + " needs voice authentication — use the voice assistant");
+      note("🎤 " + name + " needs voice authentication — use the voice assistant");
     } else if (!r.ok || body.success === false) {
       note(body.error || body.message || "Could not reach the device", true);
+    } else if (toggle) {
+      // Optimistic flip; the next board load shows HA's real state.
+      const nowOn = !tile.classList.contains("ison");
+      tile.classList.toggle("ison", nowOn);
+      const lbl = tile.querySelector(".tdom");
+      if (lbl) lbl.textContent = dom.replace("_", " ") + " · " + (nowOn ? "on" : "off");
+      note("✓ " + name + " turned " + (nowOn ? "on" : "off"));
     } else {
-      note("✓ " + pretty(entity) + " activated");
+      note("✓ " + name + " activated");
     }
   } catch (e) { note(e.message, true); }
   setTimeout(() => tile.classList.remove("fired"), 900);
