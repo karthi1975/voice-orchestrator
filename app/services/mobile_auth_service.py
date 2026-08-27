@@ -286,6 +286,11 @@ class MobileAuthService:
         app can attach user identity to feedback reports.
         """
         homes: List[Home] = self._homes.list_by_user(user.user_id, active_only=True)
+        # Oldest-first so default_home_id is STABLE: the user's first
+        # (primary) home stays the default when later homes are added.
+        # (list_by_user orders newest-first, which would silently flip the
+        # default to whichever home was onboarded last.)
+        homes.sort(key=lambda h: (h.created_at is None, h.created_at))
         return {
             "user_ref": user.user_id,
             "user_id": user.user_id,
