@@ -5,6 +5,7 @@ Thread-safe in-memory storage for Home entities.
 Suitable for development and single-instance deployments.
 """
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Optional, List, Dict
 from threading import Lock
@@ -86,21 +87,24 @@ class InMemoryHomeRepository(IHomeRepository):
                     self._user_index[home.user_id] = []
                 self._user_index[home.user_id].append(home.home_id)
 
-            # Update updated_at timestamp
-            updated_home = Home(
-                home_id=home.home_id,
-                user_id=home.user_id,
-                name=home.name,
-                ha_url=home.ha_url,
-                ha_webhook_id=home.ha_webhook_id,
-                is_active=home.is_active,
-                created_at=home.created_at,
-                updated_at=datetime.now()
-            )
+            # Update updated_at timestamp; replace() carries every field
+            # (the old field-by-field rebuild silently dropped test_mode
+            # and ha_token_encrypted)
+            updated_home = replace(home, updated_at=datetime.now())
 
             # Update storage
             self._storage[home.home_id] = updated_home
             return updated_home
+
+    def set_ha_token(self, home_id: str, encrypted=None) -> bool:
+        """Store (or clear, with None) the encrypted HA token for a home."""
+        with self._lock:
+            home = self._storage.get(home_id)
+        if home is None:
+            return False
+        home.ha_token_encrypted = encrypted
+        home.updated_at = datetime.now()
+        return True
 
     def delete(self, home_id: str) -> bool:
         """Hard delete a home."""
@@ -160,17 +164,8 @@ class InMemoryHomeRepository(IHomeRepository):
             if not home:
                 return False
 
-            # Create updated home with is_active=False
-            updated_home = Home(
-                home_id=home.home_id,
-                user_id=home.user_id,
-                name=home.name,
-                ha_url=home.ha_url,
-                ha_webhook_id=home.ha_webhook_id,
-                is_active=False,
-                created_at=home.created_at,
-                updated_at=datetime.now()
-            )
+            # Flip is_active only — replace() preserves every other field
+            updated_home = replace(home, is_active=False, updated_at=datetime.now())
             self._storage[home_id] = updated_home
             return True
 
@@ -181,17 +176,8 @@ class InMemoryHomeRepository(IHomeRepository):
             if not home:
                 return False
 
-            # Create updated home with is_active=True
-            updated_home = Home(
-                home_id=home.home_id,
-                user_id=home.user_id,
-                name=home.name,
-                ha_url=home.ha_url,
-                ha_webhook_id=home.ha_webhook_id,
-                is_active=True,
-                created_at=home.created_at,
-                updated_at=datetime.now()
-            )
+            # Flip is_active only — replace() preserves every other field
+            updated_home = replace(home, is_active=True, updated_at=datetime.now())
             self._storage[home_id] = updated_home
             return True
 

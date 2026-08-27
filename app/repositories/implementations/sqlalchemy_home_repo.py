@@ -49,9 +49,20 @@ class SQLAlchemyHomeRepository(IHomeRepository):
             ha_webhook_id=model.ha_webhook_id,
             is_active=model.is_active,
             test_mode=model.test_mode,
+            ha_token_encrypted=model.ha_token_encrypted,
             created_at=model.created_at,
             updated_at=model.updated_at
         )
+
+    def set_ha_token(self, home_id: str, encrypted: 'Optional[str]') -> bool:
+        """Store (or clear, with None) the encrypted HA token for a home."""
+        model = self._session.get(HomeModel, home_id)
+        if model is None:
+            return False
+        model.ha_token_encrypted = encrypted
+        model.updated_at = datetime.now()
+        self._session.commit()
+        return True
 
     def _to_model(self, home: Home) -> HomeModel:
         """
@@ -71,6 +82,7 @@ class SQLAlchemyHomeRepository(IHomeRepository):
             ha_webhook_id=home.ha_webhook_id,
             is_active=home.is_active,
             test_mode=home.test_mode,
+            ha_token_encrypted=home.ha_token_encrypted,
             created_at=home.created_at,
             updated_at=home.updated_at
         )

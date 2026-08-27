@@ -91,6 +91,14 @@ class IHomeRepository(IRepository[Home]):
         """
         pass
 
+    def set_ha_token(self, home_id: str, encrypted: Optional[str]) -> bool:
+        """Store (or clear, with None) the encrypted HA token for a home.
+
+        Non-abstract for backward compatibility; concrete repositories
+        override it. Returns False when the home does not exist.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def deactivate(self, home_id: str) -> bool:
         """

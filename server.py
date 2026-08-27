@@ -165,6 +165,11 @@ def _build_favorite_service(home_validator, device_registry, voice_auth_service)
 
 voice_auth_service = _build_voice_auth_service()
 voice_auth_dispatcher = HADirectDispatcher.from_env()
+# Portal-stored (encrypted) HA tokens take precedence over HOME_CONFIGS_JSON:
+# resolve per-home credentials from the DB first, env JSON as legacy fallback.
+voice_auth_dispatcher.set_credentials_resolver(container.home_service.get_ha_credentials)
+# Let token updates from the admin API invalidate the dispatcher's cache.
+container.admin_controller.set_dispatcher(voice_auth_dispatcher)
 device_registry = HADeviceRegistry(voice_auth_dispatcher, cache_ttl_seconds=60)
 dashboard_client = HADashboardClient(voice_auth_dispatcher, cache_ttl_seconds=30)
 # Tile metadata (name/icon/category/state per entity) for the boards surface.

@@ -4,8 +4,13 @@ Admin controller for user and home management
 REST API endpoints for administrative operations.
 """
 
+import json
 import logging
+import os
+import time as _time
 from typing import Tuple, Any, Optional
+
+import requests as _requests
 from flask import request
 from app.controllers.base_controller import BaseController
 from app.services.user_service import UserService
@@ -159,6 +164,24 @@ class AdminController(BaseController):
             'get_user_homes',
             self.get_user_homes,
             methods=['GET']
+        )
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/token',
+            'set_home_token',
+            self.set_home_token,
+            methods=['PUT']
+        )
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/test-connection',
+            'test_home_connection',
+            self.test_home_connection,
+            methods=['POST']
+        )
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/test-webhook',
+            'test_home_webhook',
+            self.test_home_webhook,
+            methods=['POST']
         )
         self.blueprint.add_url_rule(
             '/homes/<home_id>/test-mode',
@@ -483,13 +506,203 @@ class AdminController(BaseController):
                 ha_webhook_id=req.ha_webhook_id
             )
 
-            response = HomeResponse.from_model(home)
+            provided_token = (data.get('ha_token') or '').strip()
+            if provided_token:
+                self._home_service.set_ha_token(home.home_id, provided_token)
+
+            d = self._with_token_info(HomeResponse.from_model(home).to_dict())
             logger.info(f"Home created: {home.home_id}")
-            return self.json_response(response.to_dict(), 201)
+            return self.json_response(d, 201)
 
         except ValueError as e:
             logger.warning(f"Failed to create home: {str(e)}")
             return self.error_response(str(e), 400)
+
+
+    # ------------------------------------------------------------------
+    # Portal-managed HA tokens + onboarding checks (Phase 1/2)
+    # ------------------------------------------------------------------
+
+    # Set by server.py so token updates invalidate the dispatcher's
+    # credential cache immediately (otherwise the 60s TTL applies).
+    _dispatcher = None
+
+    def set_dispatcher(self, dispatcher) -> None:
+        self._dispatcher = dispatcher
+
+    @staticmethod
+    def _env_home_ids() -> set:
+        try:
+            return set(json.loads(os.environ.get('HOME_CONFIGS_JSON', '{}')).keys())
+        except (ValueError, AttributeError):
+            return set()
+
+    def _with_token_info(self, home_dict: dict) -> dict:
+        """Augment a home response dict with non-secret token metadata."""
+        home_id = home_dict.get('home_id', '')
+        try:
+            status = self._home_service.token_status(home_id)
+        except Exception:
+            status = {'has_token': False, 'token_hint': None}
+        if status['has_token']:
+            source = 'portal'
+        elif home_id in self._env_home_ids():
+            source = 'env'
+        else:
+            source = None
+        home_dict.update(status)
+        home_dict['token_source'] = source
+        home_dict['dispatchable'] = source is not None
+        return home_dict
+
+    def _resolve_test_token(self, home_id: str, body: dict) -> Optional[str]:
+        """Token for connectivity tests: request body > portal DB > env JSON."""
+        provided = (body.get('ha_token') or '').strip()
+        if provided:
+            return provided
+        stored = self._home_service.get_stored_ha_token(home_id)
+        if stored:
+            return stored
+        try:
+            cfg = json.loads(os.environ.get('HOME_CONFIGS_JSON', '{}')).get(home_id) or {}
+            return (cfg.get('ha_token') or '').strip() or None
+        except ValueError:
+            return None
+
+    def set_home_token(self, home_id: str) -> Tuple[Any, int]:
+        """PUT /admin/homes/{home_id}/token — store/rotate/clear the HA token.
+
+        Body: {"ha_token": "eyJ..."}; empty string or null clears the stored
+        token (dispatch then falls back to legacy env config, if present).
+        The token is encrypted at rest and never returned by any endpoint.
+        """
+        self.log_request(f'set_home_token:{home_id}')
+        try:
+            data = self.get_request_json()
+            token = (data.get('ha_token') or '').strip()
+            self._home_service.set_ha_token(home_id, token or None)
+            if self._dispatcher is not None:
+                try:
+                    self._dispatcher.invalidate_home(home_id)
+                except Exception:
+                    pass
+            home = self._home_service.get_home(home_id)
+            d = self._with_token_info(HomeResponse.from_model(home).to_dict())
+            logger.info(f"HA token {'stored' if token else 'cleared'} for home {home_id}")
+            return self.json_response(d, 200)
+        except ValueError as e:
+            return self.error_response(str(e), 404)
+
+    def test_home_connection(self, home_id: str) -> Tuple[Any, int]:
+        """POST /admin/homes/{home_id}/test-connection — live HA API check.
+
+        Optional body {"ha_token": "..."} tests a token BEFORE saving it;
+        otherwise uses the stored portal token, then the legacy env token.
+        """
+        self.log_request(f'test_home_connection:{home_id}')
+        try:
+            home = self._home_service.get_home(home_id)
+        except ValueError as e:
+            return self.error_response(str(e), 404)
+        body = request.get_json(silent=True) or {}
+        token = self._resolve_test_token(home_id, body)
+        if not token:
+            return self.json_response({
+                'ok': False, 'stage': 'token',
+                'message': 'No HA token available — provide one or store one first.',
+            }, 200)
+        base = home.ha_url.strip().rstrip('/')
+        headers = {'Authorization': f'Bearer {token}'}
+        try:
+            r = _requests.get(f'{base}/api/config', headers=headers, timeout=10)
+            if r.status_code == 200:
+                cfg = r.json()
+                return self.json_response({
+                    'ok': True, 'stage': 'connected',
+                    'message': 'Connected to Home Assistant.',
+                    'ha_name': cfg.get('location_name'),
+                    'ha_version': cfg.get('version'),
+                }, 200)
+            if r.status_code == 401:
+                return self.json_response({'ok': False, 'stage': 'auth',
+                                           'message': 'HA rejected the token (401). Create a new long-lived token.'}, 200)
+            return self.json_response({'ok': False, 'stage': 'http',
+                                       'message': f'HA returned {r.status_code}.'}, 200)
+        except _requests.exceptions.Timeout:
+            return self.json_response({'ok': False, 'stage': 'network',
+                                       'message': f'Timed out reaching {base}.'}, 200)
+        except _requests.exceptions.RequestException as e:
+            return self.json_response({'ok': False, 'stage': 'network',
+                                       'message': f'Could not reach {base}: {type(e).__name__}'}, 200)
+
+    def test_home_webhook(self, home_id: str) -> Tuple[Any, int]:
+        """POST /admin/homes/{home_id}/test-webhook — fire the voice-auth webhook.
+
+        Body (all optional): {"scene": "night_scene",
+                              "automation_entity": "automation.voice_auth_night_scene"}
+        HA answers 200 even for unknown/blocked webhooks, so when an
+        automation entity (and a usable token) is available we prove the
+        trigger by comparing its last_triggered before/after.
+        """
+        self.log_request(f'test_home_webhook:{home_id}')
+        try:
+            home = self._home_service.get_home(home_id)
+        except ValueError as e:
+            return self.error_response(str(e), 404)
+        body = request.get_json(silent=True) or {}
+        scene = (body.get('scene') or 'night_scene').strip()
+        automation = (body.get('automation_entity') or '').strip()
+        token = self._resolve_test_token(home_id, body)
+        base = home.ha_url.strip().rstrip('/')
+        webhook_url = f"{base}/api/webhook/{home.ha_webhook_id.strip()}"
+
+        def last_triggered():
+            if not (automation and token):
+                return None
+            try:
+                r = _requests.get(f'{base}/api/states/{automation}',
+                                  headers={'Authorization': f'Bearer {token}'}, timeout=10)
+                if r.status_code != 200:
+                    return None
+                st = r.json()
+                return {'state': st.get('state'),
+                        'last_triggered': (st.get('attributes') or {}).get('last_triggered')}
+            except _requests.exceptions.RequestException:
+                return None
+
+        before = last_triggered()
+        if before and before.get('state') == 'off':
+            return self.json_response({
+                'ok': False, 'stage': 'automation_disabled',
+                'message': f'{automation} is disabled in HA — enable it, then retest.',
+            }, 200)
+        try:
+            r = _requests.post(webhook_url, json={'scene': scene}, timeout=10)
+        except _requests.exceptions.RequestException as e:
+            return self.json_response({'ok': False, 'stage': 'network',
+                                       'message': f'Could not reach {webhook_url}: {type(e).__name__}'}, 200)
+        if r.status_code >= 400:
+            return self.json_response({'ok': False, 'stage': 'http',
+                                       'message': f'Webhook POST returned {r.status_code}.'}, 200)
+        if before is None:
+            return self.json_response({
+                'ok': True, 'stage': 'sent_unverified',
+                'message': ('Webhook accepted (HTTP 200). NOTE: HA returns 200 even for '
+                            'unknown webhook IDs — pass automation_entity (with a token) '
+                            'to verify the automation really ran.'),
+            }, 200)
+        _time.sleep(1.5)
+        after = last_triggered()
+        triggered = bool(after and after.get('last_triggered')
+                         and after.get('last_triggered') != (before or {}).get('last_triggered'))
+        return self.json_response({
+            'ok': triggered,
+            'stage': 'verified' if triggered else 'not_triggered',
+            'message': (f'{automation} triggered — webhook path fully working.' if triggered else
+                        f'Webhook accepted but {automation} did not trigger — check the webhook ID '
+                        f'on the automation, its "local network only" setting, and its condition.'),
+            'last_triggered': (after or {}).get('last_triggered'),
+        }, 200)
 
     def list_homes(self) -> Tuple[Any, int]:
         """
@@ -507,7 +720,9 @@ class AdminController(BaseController):
         homes = self._home_service.list_homes(active_only=active_only)
 
         response = HomeListResponse.from_models(homes)
-        return self.json_response(response.to_dict(), 200)
+        d = response.to_dict()
+        d['homes'] = [self._with_token_info(h) for h in d.get('homes', [])]
+        return self.json_response(d, 200)
 
     def get_home(self, home_id: str) -> Tuple[Any, int]:
         """
@@ -524,8 +739,8 @@ class AdminController(BaseController):
 
         try:
             home = self._home_service.get_home(home_id)
-            response = HomeResponse.from_model(home)
-            return self.json_response(response.to_dict(), 200)
+            d = self._with_token_info(HomeResponse.from_model(home).to_dict())
+            return self.json_response(d, 200)
 
         except ValueError as e:
             return self.error_response(str(e), 404)
@@ -562,9 +777,9 @@ class AdminController(BaseController):
                 ha_webhook_id=req.ha_webhook_id
             )
 
-            response = HomeResponse.from_model(home)
+            d = self._with_token_info(HomeResponse.from_model(home).to_dict())
             logger.info(f"Home updated: {home_id}")
-            return self.json_response(response.to_dict(), 200)
+            return self.json_response(d, 200)
 
         except ValueError as e:
             logger.warning(f"Failed to update home {home_id}: {str(e)}")

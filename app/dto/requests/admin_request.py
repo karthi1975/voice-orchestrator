@@ -115,12 +115,14 @@ class CreateHomeRequest(BaseDTO):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CreateHomeRequest':
         """Create from dictionary."""
+        def _s(v):
+            return v.strip() if isinstance(v, str) else v
         return cls(
-            home_id=require_field(data, 'home_id'),
-            user_id=require_field(data, 'user_id'),
-            name=require_field(data, 'name'),
-            ha_url=require_field(data, 'ha_url'),
-            ha_webhook_id=require_field(data, 'ha_webhook_id')
+            home_id=_s(require_field(data, 'home_id')),
+            user_id=_s(require_field(data, 'user_id')),
+            name=_s(require_field(data, 'name')),
+            ha_url=_s(require_field(data, 'ha_url')),
+            ha_webhook_id=_s(require_field(data, 'ha_webhook_id'))
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -166,10 +168,12 @@ class UpdateHomeRequest(BaseDTO):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'UpdateHomeRequest':
         """Create from dictionary."""
+        def _s(v):
+            return v.strip() if isinstance(v, str) else v
         return cls(
-            name=get_field(data, 'name'),
-            ha_url=get_field(data, 'ha_url'),
-            ha_webhook_id=get_field(data, 'ha_webhook_id'),
+            name=_s(get_field(data, 'name')),
+            ha_url=_s(get_field(data, 'ha_url')),
+            ha_webhook_id=_s(get_field(data, 'ha_webhook_id')),
             is_active=get_field(data, 'is_active')
         )
 

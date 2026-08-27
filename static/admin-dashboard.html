@@ -747,6 +747,13 @@
                             <input type="text" id="home-webhook" class="form-input" required>
                             <div class="form-hint">Home Assistant webhook ID</div>
                         </div>
+                        <div class="form-field">
+                            <label class="form-label" for="home-ha-token">HA Long-Lived Token</label>
+                            <input type="password" id="home-ha-token" class="form-input"
+                                   placeholder="eyJ... (optional — enables dispatch, no SSH needed)"
+                                   autocomplete="new-password">
+                            <div class="form-hint">HA profile &rarr; Security &rarr; Long-lived access tokens. Stored encrypted; never shown again.</div>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-primary">
                         <span class="material-icons">add</span>
@@ -1329,6 +1336,11 @@
                         <span class="badge ${home.is_active ? 'badge-success' : 'badge-error'}">
                             ${home.is_active ? 'Active' : 'Inactive'}
                         </span>
+                        ${home.token_source === 'portal'
+                            ? `<span class="badge badge-success" title="Encrypted HA token stored in the portal${home.token_hint ? ' (' + home.token_hint + ')' : ''}">Token</span>`
+                            : home.token_source === 'env'
+                                ? `<span class="badge badge-warning" title="Token still in server env (HOME_CONFIGS_JSON) — add it here to manage it from the portal">Env token</span>`
+                                : `<span class="badge badge-error" title="No HA token anywhere — dispatch to this home will fail. Click Token to add one.">No token</span>`}
                     </td>
                     <td>
                         <label class="toggle-switch">
@@ -1346,6 +1358,18 @@
                             <button class="btn btn-secondary btn-small" onclick="viewHomeScenes('${home.home_id}')" title="View Scenes">
                                 <span class="material-icons">movie</span>
                                 Scenes
+                            </button>
+                            <button class="btn btn-secondary btn-small" onclick="setHomeToken('${home.home_id}')" title="Store / rotate / clear the encrypted HA token">
+                                <span class="material-icons">key</span>
+                                Token
+                            </button>
+                            <button class="btn btn-secondary btn-small" onclick="testHomeConnection('${home.home_id}')" title="Live check: can the orchestrator reach this HA with its token?">
+                                <span class="material-icons">wifi_tethering</span>
+                                Test HA
+                            </button>
+                            <button class="btn btn-secondary btn-small" onclick="testHomeWebhook('${home.home_id}')" title="Fire the voice-auth webhook (optionally verify an automation triggered)">
+                                <span class="material-icons">webhook</span>
+                                Webhook
                             </button>
                         </div>
                     </td>
@@ -1374,6 +1398,76 @@
                 console.error('Error toggling test mode:', error);
                 showAlert('Failed to toggle test mode', 'error');
                 loadHomes();
+            }
+        }
+
+        async function setHomeToken(homeId) {
+            const token = prompt(
+                `HA long-lived token for "${homeId}"\n` +
+                '(HA profile \u2192 Security \u2192 Long-lived access tokens)\n\n' +
+                'Paste the token \u2014 or leave empty and press OK to CLEAR the stored token:');
+            if (token === null) return; // cancelled
+            try {
+                const response = await fetch(`${API_BASE}/homes/${homeId}/token`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ha_token: token.trim() })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showAlert(token.trim()
+                        ? `Token stored (encrypted) for ${homeId} \u2014 running connection test\u2026`
+                        : `Token cleared for ${homeId}`, 'success');
+                    loadHomes();
+                    if (token.trim()) testHomeConnection(homeId);
+                } else {
+                    showAlert(data.error || 'Failed to store token', 'error');
+                }
+            } catch (error) {
+                console.error('Error storing token:', error);
+                showAlert('Failed to store token', 'error');
+            }
+        }
+
+        async function testHomeConnection(homeId) {
+            showAlert(`Testing connection to ${homeId}\u2026`, 'success');
+            try {
+                const response = await fetch(`${API_BASE}/homes/${homeId}/test-connection`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
+                const data = await response.json();
+                if (data.ok) {
+                    showAlert(`\u2713 ${homeId}: connected to ${data.ha_name || 'HA'} (v${data.ha_version || '?'})`, 'success');
+                } else {
+                    showAlert(`\u2717 ${homeId}: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Connection test failed:', error);
+                showAlert('Connection test failed', 'error');
+            }
+        }
+
+        async function testHomeWebhook(homeId) {
+            const scene = prompt('Scene name to send in the webhook payload:', 'night_scene');
+            if (scene === null) return;
+            const automation = prompt(
+                'Automation entity to VERIFY it triggered (recommended),\n' +
+                'e.g. automation.voice_auth_night_scene \u2014 or leave empty to just fire:', '');
+            if (automation === null) return;
+            showAlert(`Firing webhook for ${homeId}\u2026`, 'success');
+            try {
+                const response = await fetch(`${API_BASE}/homes/${homeId}/test-webhook`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scene: scene.trim(), automation_entity: automation.trim() })
+                });
+                const data = await response.json();
+                showAlert(`${data.ok ? '\u2713' : '\u2717'} ${homeId}: ${data.message}`, data.ok ? 'success' : 'error');
+            } catch (error) {
+                console.error('Webhook test failed:', error);
+                showAlert('Webhook test failed', 'error');
             }
         }
 
@@ -1456,11 +1550,12 @@
         document.getElementById('createHomeForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
-            const homeId = document.getElementById('home-id').value;
-            const userId = document.getElementById('home-user').value;
-            const name = document.getElementById('home-name').value;
-            const haUrl = document.getElementById('home-ha-url').value;
-            const webhook = document.getElementById('home-webhook').value;
+            const homeId = document.getElementById('home-id').value.trim();
+            const userId = document.getElementById('home-user').value.trim();
+            const name = document.getElementById('home-name').value.trim();
+            const haUrl = document.getElementById('home-ha-url').value.trim();
+            const webhook = document.getElementById('home-webhook').value.trim();
+            const haToken = document.getElementById('home-ha-token').value.trim();
 
             try {
                 const response = await fetch(`${API_BASE}/homes`, {
@@ -1471,7 +1566,8 @@
                         user_id: userId,
                         name: name,
                         ha_url: haUrl,
-                        ha_webhook_id: webhook
+                        ha_webhook_id: webhook,
+                        ha_token: haToken
                     })
                 });
 
@@ -1481,6 +1577,7 @@
                     loadHomes();
                     loadStats();
                     loadHomeDropdowns();
+                    if (haToken) testHomeConnection(homeId);
                 } else {
                     const error = await response.json();
                     showAlert(error.error || 'Failed to create home', 'error');

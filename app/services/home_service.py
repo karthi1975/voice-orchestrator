@@ -30,7 +30,8 @@ class HomeService:
     def __init__(
         self,
         home_repository: IHomeRepository,
-        user_repository: IUserRepository
+        user_repository: IUserRepository,
+        token_vault=None
     ):
         """
         Initialize home service.
@@ -41,6 +42,10 @@ class HomeService:
         """
         self._home_repository = home_repository
         self._user_repository = user_repository
+        if token_vault is None:
+            from app.infrastructure.security.token_vault import TokenVault
+            token_vault = TokenVault()
+        self._vault = token_vault
 
     def register_home(
         self,
@@ -218,6 +223,61 @@ class HomeService:
             True if deleted, False if not found
         """
         return self._home_repository.delete(home_id)
+
+
+    # ------------------------------------------------------------------
+    # Encrypted per-home HA tokens (portal-managed; replaces the SSH-only
+    # HOME_CONFIGS_JSON workflow — env JSON remains a legacy fallback).
+    # ------------------------------------------------------------------
+
+    def set_ha_token(self, home_id: str, plain_token: Optional[str]) -> bool:
+        """Encrypt and store a home's HA long-lived token.
+
+        Empty/None clears the stored token (dispatcher then falls back to
+        the legacy HOME_CONFIGS_JSON env var, if the home is listed there).
+
+        Returns True when stored/cleared; raises ValueError if home missing.
+        """
+        home = self._home_repository.get_by_home_id(home_id)
+        if home is None:
+            raise ValueError(f"Home '{home_id}' not found")
+        encrypted = self._vault.encrypt(plain_token)
+        return self._home_repository.set_ha_token(home_id, encrypted)
+
+    def get_ha_credentials(self, home_id: str) -> Optional[Tuple[str, str]]:
+        """(ha_url, decrypted token) for an ACTIVE home with a DB token.
+
+        Returns None when the home is missing, inactive, or has no stored
+        token — callers (the dispatcher) fall back to legacy env config.
+        Never raises: this sits on the hot dispatch path.
+        """
+        try:
+            home = self._home_repository.get_by_home_id(home_id)
+        except Exception:
+            return None
+        if home is None or not home.is_active or not home.ha_token_encrypted:
+            return None
+        token = self._vault.decrypt(home.ha_token_encrypted)
+        if not token or not home.ha_url:
+            return None
+        return (home.ha_url.strip(), token)
+
+    def get_stored_ha_token(self, home_id: str) -> Optional[str]:
+        """Decrypted stored token regardless of active flag (admin tests)."""
+        home = self._home_repository.get_by_home_id(home_id)
+        if home is None or not home.ha_token_encrypted:
+            return None
+        return self._vault.decrypt(home.ha_token_encrypted)
+
+    def token_status(self, home_id: str) -> dict:
+        """Non-secret token metadata for admin UI: presence + display hint."""
+        home = self._home_repository.get_by_home_id(home_id)
+        if home is None or not home.ha_token_encrypted:
+            return {"has_token": False, "token_hint": None}
+        from app.infrastructure.security.token_vault import TokenVault
+        token = self._vault.decrypt(home.ha_token_encrypted)
+        return {"has_token": token is not None,
+                "token_hint": TokenVault.hint(token)}
 
     def get_ha_config(self, home_id: str) -> Tuple[str, str]:
         """

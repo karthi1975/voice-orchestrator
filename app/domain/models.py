@@ -142,6 +142,9 @@ class Home:
     ha_webhook_id: str
     is_active: bool = True
     test_mode: bool = False
+    # Encrypted HA long-lived token (TokenVault ciphertext). None = no DB
+    # token; dispatcher falls back to legacy HOME_CONFIGS_JSON env var.
+    ha_token_encrypted: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: Optional[datetime] = None
 

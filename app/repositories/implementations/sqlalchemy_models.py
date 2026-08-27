@@ -63,6 +63,7 @@ class HomeModel(Base):
     )
 
     # Home fields
+    ha_token_encrypted: Mapped[str] = mapped_column(Text, nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     ha_url: Mapped[str] = mapped_column(String(500), nullable=False)
     ha_webhook_id: Mapped[str] = mapped_column(String(255), nullable=False)

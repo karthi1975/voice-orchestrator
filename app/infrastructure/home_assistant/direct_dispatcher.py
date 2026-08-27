@@ -86,6 +86,14 @@ class HADirectDispatcher:
         self._scenes = scene_catalog
         self._overrides = home_overrides or {}
         self._timeout = request_timeout_seconds
+        # Optional DB-backed credential resolver: home_id -> (ha_url, token)
+        # or None. Consulted BEFORE the env-config map so portal-managed
+        # tokens win; env JSON remains the legacy fallback. Results are
+        # cached briefly so the hot dispatch path stays cheap.
+        self._resolver = None
+        self._resolver_cache = {}  # home_id -> (expires_monotonic, HomeConfig|None)
+        self._resolver_ttl_hit = 60.0
+        self._resolver_ttl_miss = 10.0
 
     @classmethod
     def from_env(cls, request_timeout_seconds: float = 8.0) -> "HADirectDispatcher":
@@ -98,14 +106,54 @@ class HADirectDispatcher:
         )
         return cls(homes, scenes, overrides, request_timeout_seconds)
 
+    def set_credentials_resolver(self, resolver) -> None:
+        """Install a DB-backed credential resolver.
+
+        `resolver(home_id)` returns (ha_url, ha_token) or None. Portal-stored
+        tokens then take precedence over HOME_CONFIGS_JSON; homes only present
+        in the env JSON keep working unchanged (legacy fallback).
+        """
+        self._resolver = resolver
+        self._resolver_cache = {}
+
+    def invalidate_home(self, home_id: str) -> None:
+        """Drop one home's cached credentials (call after a token update)."""
+        self._resolver_cache.pop(home_id, None)
+
+    def _resolve_home(self, home_id: str) -> Optional[HomeConfig]:
+        """DB-stored credentials first (cached), env config as fallback."""
+        if not home_id:
+            return None
+        if self._resolver is not None:
+            cached = self._resolver_cache.get(home_id)
+            if cached is not None and cached[0] > time.monotonic():
+                if cached[1] is not None:
+                    return cached[1]
+            else:
+                cfg = None
+                try:
+                    creds = self._resolver(home_id)
+                except Exception as e:  # never let DB trouble break dispatch
+                    logger.error(f"credential resolver failed for {home_id}: {e}")
+                    creds = None
+                if creds:
+                    cfg = HomeConfig(home_id=home_id, ha_url=creds[0], ha_token=creds[1])
+                ttl = self._resolver_ttl_hit if cfg else self._resolver_ttl_miss
+                self._resolver_cache[home_id] = (time.monotonic() + ttl, cfg)
+                if cfg is not None:
+                    return cfg
+        return self._homes.get(home_id)
+
     def has_home(self, home_id: str) -> bool:
-        """Return True if home_id is registered in HOME_CONFIGS_JSON.
+        """Return True if the orchestrator can dispatch to this home — i.e.
+        it has credentials from either the portal-managed DB token or the
+        legacy HOME_CONFIGS_JSON env var.
 
         Authoritative for "is this a home the orchestrator can dispatch to?".
         Other services (favorites, voice-enable provisioning) should use this
-        rather than the admin-managed `homes` Postgres table.
+        rather than checking the `homes` Postgres table directly.
         """
-        return bool(home_id) and home_id in self._homes
+        return self._resolve_home(home_id) is not None
 
     def resolve_scene(self, home_id: str, scene_name: str) -> Optional[SceneTarget]:
         key = _normalize(scene_name)
@@ -143,7 +191,7 @@ class HADirectDispatcher:
         Pass an explicit action to override (e.g. action="lock" to lock instead
         of unlock, or action="turn_off").
         """
-        home = self._homes.get(home_id)
+        home = self._resolve_home(home_id)
         if not home:
             msg = f"Unknown home_id: {home_id}"
             logger.warning(f"DISPATCH reject {msg}")
@@ -153,7 +201,7 @@ class HADirectDispatcher:
         return self._do_post(home, target, source_label=f"{service}.{entity}", action=resolved_action)
 
     def dispatch(self, home_id: str, scene_name: str) -> DispatchResult:
-        home = self._homes.get(home_id)
+        home = self._resolve_home(home_id)
         if not home:
             msg = f"Unknown home_id: {home_id}"
             logger.warning(f"DISPATCH reject {msg}")

@@ -134,6 +134,19 @@ echo "✓ Old container removed"
 
 # Start application
 echo "→ Starting Voice Orchestrator..."
+# Run database migrations before starting the new container (additive-safe;
+# same pattern as deploy/digitalocean/deploy.sh — this was previously missing
+# here, so schema changes only shipped via the droplet-side script)
+if grep -q "USE_DATABASE=true" .env; then
+    echo "→ Running database migrations..."
+    docker run --rm \
+        --network voice-orchestrator_default \
+        --env-file .env \
+        voice-orchestrator:latest \
+        python -m alembic upgrade head
+    echo "✓ Migrations applied"
+fi
+
 docker run -d \
     --name voice-orchestrator \
     --restart unless-stopped \
