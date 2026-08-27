@@ -152,6 +152,40 @@ Two differences vs the static platform key:
 
 ---
 
+## 2.2 Multiple homes — selecting & switching
+
+A user can own **several homes** (e.g. Scott: house + office). The server has
+**no "current home"** — the login token identifies the *user*, and every data
+endpoint takes an explicit `home_id`. Switching is purely client state.
+
+Login / `GET /me` now return all homes:
+
+```json
+{
+  "homes": [
+    { "home_id": "scott_home", "name": "Scott's House" },
+    { "home_id": "ne_qli_1",  "name": "NE QLI Office" }
+  ],
+  "default_home_id": "scott_home"
+}
+```
+
+| Rule | Contract |
+|---|---|
+| Source of truth | `homes[]` from login / `/me` — never hardcode `home_id` |
+| Default | `default_home_id` = the user's **first-registered** home; stable — adding homes never changes it |
+| Selected home | persist a `selectedHomeId`, initialized to `default_home_id`; switching = change it + refetch (no re-login, token unchanged) |
+| On launch | refresh `/me`; stored `selectedHomeId` missing from `homes[]` → fall back to `default_home_id`; `homes` empty → "awaiting home setup" screen |
+| Picker UI | only when `homes.length > 1` (single-home users see no change); list by `name`, checkmark the selected |
+| Per-home data | favorites, boards, device search, automations, voice-auth enrollments, VAPI numbers are all keyed by `(user_ref, home_id)` — a freshly added home starts with an empty favorites list |
+| Wrong `home_id` | not owned by the user → `403` — treat as "re-sync `/me`", not an auth failure |
+
+On switch: cancel in-flight requests, refetch `GET /favorites?home_id=…`,
+`GET /dashboards/config?…`, and any cached `/devices/discover` data. A
+voice-gated favorite in home B needs its own enrollment under home B.
+
+---
+
 ## 3. Endpoint Reference
 
 The API has six feature groups:

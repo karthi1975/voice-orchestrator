@@ -26,8 +26,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-VERSION = "1.2"
-DATE = "August 20, 2026"
+VERSION = "1.3"
+DATE = "August 27, 2026"
 OUT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "docs", "api_reference_complete.pdf",
@@ -168,7 +168,11 @@ def build():
     one(para(f"Version {VERSION} &nbsp;|&nbsp; {DATE} &nbsp;|&nbsp; Tetradapt "
              "&nbsp;|&nbsp; everything verified in production", "meta"))
     add(note(
-        "<b>What changed in 1.2.</b> §6's action matrix now covers EVERY domain, verified "
+        "<b>What changed in 1.3.</b> Multi-home support is live: login/GET /me return "
+        f"ALL of the user's homes; {mono('default_home_id')} is now guaranteed STABLE "
+        "(the first-registered home — adding a home never flips the default). New "
+        "§1.1 defines the home-switcher contract the app should implement. "
+        "<b>1.2.</b> §6's action matrix now covers EVERY domain, verified "
         "against the home's own HA service registry: toggle/turn_on/turn_off work for "
         "lights, switches, fans, covers, media players, remotes, scripts, climate and "
         "input_booleans — not just automations — plus a copy-paste test recipe. "
@@ -232,7 +236,8 @@ def build():
              '       "user_ref": "scott_mobile",  "user_id": "scott_mobile",\n'
              '       "username": "scottmeyers",   "email": "smeyersne@gmail.com",\n'
              '       "full_name": "scott meyers",\n'
-             '       "homes": [ { "home_id": "scott_home", "name": "scott_home" } ],\n'
+             '       "homes": [ { "home_id": "scott_home", "name": "Scott\'s House" },\n'
+             '                  { "home_id": "ne_qli_1",  "name": "NE QLI Office" } ],\n'
              '       "default_home_id": "scott_home" }'))
     one(para("Cache user_ref + default_home_id — use them everywhere the app previously "
              "hardcoded scott_mobile/scott_home. user_id + email are for feedback reports. "
@@ -242,6 +247,34 @@ def build():
     add(code('curl -s "$BASE/me" -H "Authorization: Bearer $TOKEN"'))
     one(para("Same payload minus token fields. 401 → token expired → login screen. Requires "
              "a login token (static keys are rejected — they carry no identity)."))
+
+    one(h2("1.1 · Multiple homes — the home-switcher contract"))
+    one(para("A user can own SEVERAL homes (e.g. house + office). There is no server-side "
+             "\u201ccurrent home\u201d: the login token identifies the USER, and every data "
+             "endpoint takes an explicit home_id. Switching homes is purely client state."))
+    add(table([
+        ["Rule", "Contract"],
+        ["Source of truth", "homes[] from POST /auth/login or GET /me — never hardcode home_id"],
+        ["Default", "default_home_id = the user's FIRST-registered home; stable — adding "
+                    "homes never changes it"],
+        ["Selected home", "keep a persisted selectedHomeId, initialized to default_home_id; "
+                          "\u201cswitching\u201d = change it and refetch — no re-login, no new token"],
+        ["On every launch", "refresh /me; if stored selectedHomeId is no longer in homes[] "
+                            "fall back to default_home_id; homes empty → \u201cawaiting home "
+                            "setup\u201d screen"],
+        ["Picker UI", "show a switcher only when homes.length &gt; 1 (single-home users see "
+                      "no change); list by name, checkmark the selected one"],
+        ["Per-home data", "favorites, boards/dashboards, device search, automations, "
+                          "voice-auth enrollments and VAPI numbers are ALL keyed by "
+                          "(user_ref, home_id) — each home has its own; expect an empty "
+                          "favorites list on a freshly added home"],
+        ["Wrong home_id", "a home_id the user doesn't own → 403 — treat as \u201cre-sync "
+                          "/me\u201d, not as an auth failure"],
+    ], [1.6, 5.3], code_cols=()))
+    one(para("Concretely: on switch, cancel in-flight requests, then refetch "
+             f"{mono('GET /favorites?home_id=…')}, {mono('GET /dashboards/config?…')} and "
+             f"any cached {mono('/devices/discover')} data for the new home. A voice-gated "
+             "favorite in home B needs its own enrollment under home B."))
 
     one(h2("POST /auth/change-password"))
     add(code('curl -s -X POST "$BASE/auth/change-password" -H "Authorization: Bearer $TOKEN" \\\n'
