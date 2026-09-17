@@ -7,7 +7,7 @@ Business logic for home registration, updates, and lifecycle management.
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from app.domain.models import Home
+from app.domain.models import Home, HomeMember, HOME_ROLES
 from app.repositories.home_repository import IHomeRepository
 from app.repositories.user_repository import IUserRepository
 
@@ -212,6 +212,38 @@ class HomeService:
 
         return self.get_home(home_id)
 
+    # ------------------------------------------------------------------
+    # Membership: several users can share one home
+    # ------------------------------------------------------------------
+
+    def list_members(self, home_id: str) -> List[HomeMember]:
+        """Memberships of a home, oldest first. Raises ValueError if missing."""
+        self.get_home(home_id)  # 404 semantics
+        return self._home_repository.list_members(home_id)
+
+    def add_member(self, home_id: str, user_id: str, role: str = "member") -> HomeMember:
+        """Attach a user to a home (idempotent; re-adding just updates the role).
+
+        Raises:
+            ValueError: unknown home, unknown user, or invalid role.
+        """
+        role = (role or "member").strip().lower()
+        if role not in HOME_ROLES:
+            raise ValueError(f"role must be one of {', '.join(HOME_ROLES)}")
+        self.get_home(home_id)
+        if not self._user_repository.exists(user_id):
+            raise ValueError(f"User with ID '{user_id}' not found")
+        return self._home_repository.add_member(home_id, user_id, role)
+
+    def remove_member(self, home_id: str, user_id: str) -> bool:
+        """Detach a user from a home. Returns False when they were not a member.
+
+        Raises:
+            ValueError: unknown home.
+        """
+        self.get_home(home_id)
+        return self._home_repository.remove_member(home_id, user_id)
+
     def delete_home(self, home_id: str) -> bool:
         """
         Permanently delete a home.
@@ -345,6 +377,6 @@ class HomeService:
             home_id: Home ID
 
         Returns:
-            True if user owns the home, False otherwise
+            True if the user is a member (or owner) of the home
         """
         return self._home_repository.exists_for_user(user_id, home_id)

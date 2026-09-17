@@ -158,6 +158,9 @@ class DependencyContainer:
             from app.repositories.implementations.sqlalchemy_oauth_token_repo import SQLAlchemyOAuthTokenRepository
             self.oauth_token_repository = SQLAlchemyOAuthTokenRepository(self._db_session)
 
+            from app.repositories.implementations.sqlalchemy_home_invite_repo import SQLAlchemyHomeInviteRepository
+            self.home_invite_repository = SQLAlchemyHomeInviteRepository(self._db_session)
+
             logger.info("Repositories initialized (SQLAlchemy/PostgreSQL)")
         else:
             # Use in-memory repositories (default)
@@ -175,6 +178,9 @@ class DependencyContainer:
 
             from app.repositories.implementations.in_memory_oauth_token_repo import InMemoryOAuthTokenRepository
             self.oauth_token_repository = InMemoryOAuthTokenRepository()
+
+            from app.repositories.implementations.in_memory_home_invite_repo import InMemoryHomeInviteRepository
+            self.home_invite_repository = InMemoryHomeInviteRepository()
 
             logger.info("Repositories initialized (in-memory)")
 
@@ -203,6 +209,14 @@ class DependencyContainer:
         )
 
         self.home_service = HomeService(
+            home_repository=self.home_repository,
+            user_repository=self.user_repository
+        )
+
+        # OTP-style invite codes: attach a user to a home at sign-up
+        from app.services.home_invite_service import HomeInviteService
+        self.home_invite_service = HomeInviteService(
+            invite_repository=self.home_invite_repository,
             home_repository=self.home_repository,
             user_repository=self.user_repository
         )
@@ -288,7 +302,8 @@ class DependencyContainer:
             user_service=self.user_service,
             home_service=self.home_service,
             alexa_mapping_service=self.alexa_mapping_service,
-            scene_mapping_service=self.scene_mapping_service
+            scene_mapping_service=self.scene_mapping_service,
+            invite_service=self.home_invite_service
         )
 
         # Guard /admin/*: admin session or ADMIN_API_TOKEN bearer required

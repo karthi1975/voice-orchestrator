@@ -267,3 +267,84 @@ class OAuthToken:
     amazon_user_id: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: Optional[datetime] = None
+
+
+# Roles a user can hold on a home. "owner" is the person the home was
+# registered for; "member" is anyone else who was added or joined via an
+# invite code. Both see the home at login and may use it from the app.
+HOME_ROLE_OWNER = "owner"
+HOME_ROLE_MEMBER = "member"
+HOME_ROLES = (HOME_ROLE_OWNER, HOME_ROLE_MEMBER)
+
+
+@dataclass
+class HomeMember:
+    """
+    Membership of a user in a home (many-to-many).
+
+    A home can be listed for several users at once (a family, or two
+    testers sharing a demo home). The legacy `Home.user_id` column stays
+    as the original owner; membership rows are what login and the
+    per-home access check consult.
+
+    Attributes:
+        home_id: Home the user belongs to
+        user_id: Member user ID
+        role: "owner" or "member"
+        created_at: When the membership was granted
+    """
+    home_id: str
+    user_id: str
+    role: str = HOME_ROLE_MEMBER
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class HomeInvite:
+    """
+    OTP-style invite code that attaches a user to a home.
+
+    An admin generates a code for a home; the user types it during
+    sign-up (account is created active and attached in one step) or
+    redeems it later from an already active account.
+
+    Attributes:
+        code: Canonical code (8 chars, uppercase, no separators)
+        home_id: Home the code grants membership to
+        role: Role granted on redeem ("member" by default)
+        created_by: Admin identity that generated the code (free text)
+        created_at: When the code was generated
+        expires_at: After this the code is rejected (None = never)
+        max_uses: How many accounts may redeem it (family codes > 1)
+        use_count: Successful redemptions so far
+        revoked_at: Set when an admin revokes the code early
+    """
+    code: str
+    home_id: str
+    role: str = HOME_ROLE_MEMBER
+    created_by: Optional[str] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    expires_at: Optional[datetime] = None
+    max_uses: int = 1
+    use_count: int = 0
+    revoked_at: Optional[datetime] = None
+
+    @property
+    def display_code(self) -> str:
+        """Human-friendly form, e.g. K7QX-4MRP (the stored code has no dash)."""
+        c = self.code
+        return f"{c[:4]}-{c[4:]}" if len(c) == 8 else c
+
+    def status(self, now: Optional[datetime] = None) -> str:
+        """One of: active, revoked, expired, exhausted."""
+        now = now or datetime.now()
+        if self.revoked_at is not None:
+            return "revoked"
+        if self.expires_at is not None and now >= self.expires_at:
+            return "expired"
+        if self.use_count >= self.max_uses:
+            return "exhausted"
+        return "active"
+
+    def is_redeemable(self, now: Optional[datetime] = None) -> bool:
+        return self.status(now) == "active"

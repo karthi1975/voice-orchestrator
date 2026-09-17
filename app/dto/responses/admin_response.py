@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from datetime import datetime
 from app.dto.base import BaseDTO
-from app.domain.models import User, Home, AlexaUserMapping, SceneWebhookMapping
+from app.domain.models import HomeInvite, HomeMember, User, Home, AlexaUserMapping, SceneWebhookMapping
 
 
 @dataclass
@@ -452,3 +452,84 @@ class ErrorResponse(BaseDTO):
             error=data['error'],
             details=data.get('details')
         )
+
+
+@dataclass
+class HomeMemberResponse(BaseDTO):
+    """
+    One membership row, enriched with the user's display fields.
+
+    Attributes:
+        home_id, user_id, role, created_at, plus username/email/full_name
+        (None when the user row is gone)
+    """
+    home_id: str
+    user_id: str
+    role: str
+    created_at: str
+    username: Optional[str] = None
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+
+    @classmethod
+    def from_model(cls, member: HomeMember, user: Optional[User] = None) -> 'HomeMemberResponse':
+        return cls(
+            home_id=member.home_id,
+            user_id=member.user_id,
+            role=member.role,
+            created_at=member.created_at.isoformat() if member.created_at else None,
+            username=user.username if user else None,
+            email=user.email if user else None,
+            full_name=user.full_name if user else None,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'home_id': self.home_id, 'user_id': self.user_id, 'role': self.role,
+            'created_at': self.created_at, 'username': self.username,
+            'email': self.email, 'full_name': self.full_name,
+        }
+
+
+@dataclass
+class HomeInviteResponse(BaseDTO):
+    """
+    An invite code as shown to admins. `code` is the human form (XXXX-XXXX).
+
+    status is one of: active | expired | exhausted | revoked
+    """
+    code: str
+    home_id: str
+    role: str
+    status: str
+    created_by: Optional[str]
+    created_at: str
+    expires_at: Optional[str]
+    max_uses: int
+    use_count: int
+    revoked_at: Optional[str]
+
+    @classmethod
+    def from_model(cls, invite: HomeInvite) -> 'HomeInviteResponse':
+        iso = lambda d: d.isoformat() if d else None  # noqa: E731
+        return cls(
+            code=invite.display_code,
+            home_id=invite.home_id,
+            role=invite.role,
+            status=invite.status(),
+            created_by=invite.created_by,
+            created_at=iso(invite.created_at),
+            expires_at=iso(invite.expires_at),
+            max_uses=invite.max_uses,
+            use_count=invite.use_count,
+            revoked_at=iso(invite.revoked_at),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'code': self.code, 'home_id': self.home_id, 'role': self.role,
+            'status': self.status, 'created_by': self.created_by,
+            'created_at': self.created_at, 'expires_at': self.expires_at,
+            'max_uses': self.max_uses, 'use_count': self.use_count,
+            'revoked_at': self.revoked_at,
+        }

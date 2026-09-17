@@ -329,3 +329,81 @@ class UpdateSceneWebhookMappingRequest(BaseDTO):
         if self.is_active is not None:
             result['is_active'] = self.is_active
         return result
+
+
+@dataclass
+class AddHomeMemberRequest(BaseDTO):
+    """
+    Request to attach a user to a home (shared home membership).
+
+    Attributes:
+        user_id: User to add
+        role: "member" (default) or "owner"
+    """
+    user_id: str
+    role: str = "member"
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'AddHomeMemberRequest':
+        """Create from dictionary."""
+        def _s(v):
+            return v.strip() if isinstance(v, str) else v
+        return cls(
+            user_id=_s(require_field(data, 'user_id')),
+            role=_s(get_field(data, 'role', 'member')) or 'member',
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {'user_id': self.user_id, 'role': self.role}
+
+    def validate(self) -> None:
+        """Validate request data."""
+        if not self.user_id or not str(self.user_id).strip():
+            raise ValidationError("user_id cannot be empty")
+        if self.role not in ('member', 'owner'):
+            raise ValidationError("role must be 'member' or 'owner'")
+
+
+@dataclass
+class CreateHomeInviteRequest(BaseDTO):
+    """
+    Request to generate an OTP-style invite code for a home.
+
+    Attributes:
+        role: Role granted on redeem ("member" default, or "owner")
+        expires_in_hours: Validity window (default 168 = 7 days, max 8760)
+        max_uses: How many accounts may redeem it (default 1, max 100)
+    """
+    role: str = "member"
+    expires_in_hours: Optional[int] = None
+    max_uses: int = 1
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CreateHomeInviteRequest':
+        """Create from dictionary (all fields optional)."""
+        data = data or {}
+        role = get_field(data, 'role', 'member')
+        return cls(
+            role=(role.strip().lower() if isinstance(role, str) else 'member') or 'member',
+            expires_in_hours=get_field(data, 'expires_in_hours', None),
+            max_uses=get_field(data, 'max_uses', 1),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {'role': self.role, 'expires_in_hours': self.expires_in_hours,
+                'max_uses': self.max_uses}
+
+    def validate(self) -> None:
+        """Validate request data."""
+        if self.role not in ('member', 'owner'):
+            raise ValidationError("role must be 'member' or 'owner'")
+        if self.expires_in_hours is not None:
+            if isinstance(self.expires_in_hours, bool) or \
+                    not isinstance(self.expires_in_hours, int) or \
+                    not 1 <= self.expires_in_hours <= 8760:
+                raise ValidationError("expires_in_hours must be an integer 1-8760")
+        if isinstance(self.max_uses, bool) or not isinstance(self.max_uses, int) \
+                or not 1 <= self.max_uses <= 100:
+            raise ValidationError("max_uses must be an integer 1-100")

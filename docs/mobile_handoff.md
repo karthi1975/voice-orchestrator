@@ -50,19 +50,50 @@ app should fetch and cache them on startup instead.
 
 ### Sign-up (new accounts)
 
+The sign-up screen has three required fields plus an **optional "Home code"**
+field. HomeAdapt gives a user an 8-character invite code (`K7QX-4MRP`) for
+their home; entering it at sign-up skips the manual approval step.
+
 ```bash
 curl -s -X POST "$BASE/auth/signup" \
   -H "Content-Type: application/json" \
-  -d '{"email": "new@example.com", "password": "min-8-chars", "full_name": "New User"}'
+  -d '{"email": "new@example.com", "password": "min-8-chars", "full_name": "New User",
+       "invite_code": "K7QX-4MRP"}'
 ```
 
-`201` → `{"status": "pending_approval", "email": "...", "message": "..."}`.
+**With a valid `invite_code`** → `201` with `"status": "active"` **and the
+full login payload** (`token`, `user_ref`, `homes`, `default_home_id`, …
+exactly as `/auth/login` returns). Treat it as a successful login: store the
+token and go straight to the home screen. The account is already attached to
+the invited home.
+
+**Without `invite_code`** (or empty string) → `201`
+`{"status": "pending_approval", "email": "...", "message": "..."}`.
 Accounts start **pending**: the user cannot log in until HomeAdapt activates
 the account and attaches their home (admin approval — keeps onboarding under
 our control). Show the returned `message` and route back to the login screen.
 
-Errors: `409 EMAIL_EXISTS` (offer login instead), `400 VALIDATION`,
-`429 RATE_LIMITED` (5 signups/15 min per IP).
+Invite-code rules for the field: accept any case, with or without the dash,
+and trim whitespace (the server normalises it). Send the field only when the
+user typed something.
+
+Errors: `400 INVALID_INVITE` (see below — nothing is created, let the user fix
+the code or clear it and sign up pending), `409 EMAIL_EXISTS` (offer login
+instead), `400 VALIDATION`, `429 RATE_LIMITED` (5 signups/15 min per IP, or
+5 bad invite codes/15 min per IP).
+
+`INVALID_INVITE` carries a `reason` you can map to copy:
+
+| `reason` | Show |
+|---|---|
+| `unknown` | "That code isn't valid — check it and try again" |
+| `expired` | "That code has expired — ask HomeAdapt for a new one" |
+| `exhausted` | "That code has already been used" |
+| `revoked` | "That code was cancelled — ask HomeAdapt for a new one" |
+| `home_inactive` | "The home for that code isn't active" |
+
+(The server's `error` string already says the same thing if you'd rather
+display it verbatim.)
 
 Logging in before activation (correct password) → `403 PENDING_APPROVAL` —
 show "your account is awaiting activation."
@@ -130,6 +161,29 @@ no forced re-login. Errors: `403 FORBIDDEN` wrong current password,
 5 wrong current-password attempts (15-min lock), `401` missing/expired token.
 Forgotten passwords are reset by the admin (`PUT /admin/users/{id}/password`).
 
+### Join a home with an invite code (existing accounts)
+
+An already logged-in user can add a home to their account by entering an
+invite code — e.g. a second tester joining a shared demo home, or a family
+member being added to a house. Put this behind a **"Join a home"** action
+(settings or the home picker).
+
+```bash
+curl -s -X POST "$BASE/auth/redeem-invite" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"invite_code": "K7QX-4MRP"}'
+```
+
+`200` → the same identity payload as `GET /me`, now including the new home
+in `homes[]`. Replace the cached `homes` list with it; `default_home_id`
+does not change (it stays the user's first home), so switch
+`selectedHomeId` to the new home yourself if that's the better UX.
+
+Errors: `400 INVALID_INVITE` (+ `reason`, same table as sign-up),
+`400 VALIDATION` (missing code), `401` missing/expired token,
+`429 RATE_LIMITED` after 5 bad codes (15-min lock per account/IP).
+
 ### Using the token on every other endpoint
 
 The login token works as the bearer on **all** endpoints below — same
@@ -154,9 +208,11 @@ Two differences vs the static platform key:
 
 ## 2.2 Multiple homes — selecting & switching
 
-A user can own **several homes** (e.g. Scott: house + office). The server has
-**no "current home"** — the login token identifies the *user*, and every data
-endpoint takes an explicit `home_id`. Switching is purely client state.
+A user can belong to **several homes** (e.g. Scott: house + office), and a
+home can be **shared by several users** (Scott and Aaron both see
+`scott_home`). The server has **no "current home"** — the login token
+identifies the *user*, and every data endpoint takes an explicit `home_id`.
+Switching is purely client state.
 
 Login / `GET /me` now return all homes:
 
@@ -178,7 +234,8 @@ Login / `GET /me` now return all homes:
 | On launch | refresh `/me`; stored `selectedHomeId` missing from `homes[]` → fall back to `default_home_id`; `homes` empty → "awaiting home setup" screen |
 | Picker UI | only when `homes.length > 1` (single-home users see no change); list by `name`, checkmark the selected |
 | Per-home data | favorites, boards, device search, automations, voice-auth enrollments, VAPI numbers are all keyed by `(user_ref, home_id)` — a freshly added home starts with an empty favorites list |
-| Wrong `home_id` | not owned by the user → `403` — treat as "re-sync `/me`", not an auth failure |
+| Wrong `home_id` | user is not a member of it → `403` — treat as "re-sync `/me`", not an auth failure |
+| Gaining a home | admin adds the user, or the user redeems an invite code (`POST /auth/redeem-invite`) → `homes[]` grows on the next `/me`; other members of that home are unaffected |
 
 On switch: cancel in-flight requests, refetch `GET /favorites?home_id=…`,
 `GET /dashboards/config?…`, and any cached `/devices/discover` data. A
@@ -855,7 +912,11 @@ The SDK uses the **VAPI public key**, not the mobile API key.
 |---|---|---|---|
 | `200` / `201` / `204` | — | OK | proceed |
 | `400` | `VALIDATION` | Bad request body | fix input, show inline error |
-| `401` | `UNAUTHORIZED` | Missing / wrong API key | auth-config bug — do not retry blindly |
+| `400` | `INVALID_INVITE` | Invite code unknown / expired / exhausted / revoked (`reason` field) | show reason, let user re-enter or clear the code |
+| `401` | `UNAUTHORIZED` | Missing / wrong API key or login credentials | auth-config bug — do not retry blindly; on login show "invalid credentials" |
+| `403` | `PENDING_APPROVAL` | Correct password, account not yet activated | show "awaiting activation" |
+| `409` | `EMAIL_EXISTS` | Sign-up with an email that already has an account | offer "log in instead" |
+| `429` | `RATE_LIMITED` | Too many failed logins / sign-ups / bad invite codes (15-min lock) | show "try again later"; never auto-retry |
 | `404` | — | Not found | varies (prompt to create, etc.) |
 | `409` | `ENROLLMENT_REQUIRED` | Automation/favorite is voice-gated (always for locks) | launch VAPI session instead |
 | `400` | `NO_CONTROLLABLE_ENTITY` | Device has only sensors/diagnostics; cannot be favorited | exclude from picker |
@@ -875,6 +936,11 @@ Error envelope is always:
 
 Run through these to verify the integration end-to-end:
 
+- [ ] `POST /auth/signup` without a code → `201 pending_approval`; login → `403 PENDING_APPROVAL`
+- [ ] `POST /auth/signup` with a valid invite code → `201 status: active` + token, `homes[]` contains the invited home
+- [ ] `POST /auth/signup` with a bad invite code → `400 INVALID_INVITE` and no account created (same email signs up fine afterwards)
+- [ ] `POST /auth/redeem-invite` with bearer + valid code → `200`, `homes[]` grew; `GET /me` agrees
+- [ ] Two accounts sharing one home both list it at login
 - [ ] `GET /enrollments?user_ref=demo_user` with no `Authorization` → `401`
 - [ ] Same call with valid bearer → `200 { count: 0, items: [] }`
 - [ ] `POST /enrollments` → `201` with `automation_id` echoed back

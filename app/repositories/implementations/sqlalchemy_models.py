@@ -84,6 +84,57 @@ class HomeModel(Base):
         return f"<HomeModel(home_id={self.home_id}, name={self.name})>"
 
 
+class HomeMemberModel(Base):
+    """
+    SQLAlchemy model for HomeMember entity (many-to-many users <-> homes).
+
+    Maps to 'home_members' table. One row per (home, user). Backfilled from
+    homes.user_id by migration 011 so every existing owner is a member.
+    """
+    __tablename__ = 'home_members'
+
+    home_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey('homes.home_id'), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey('users.user_id'), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default='member')
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index('idx_home_members_user_id', 'user_id'),
+    )
+
+    def __repr__(self) -> str:
+        return f"<HomeMemberModel(home_id={self.home_id}, user_id={self.user_id}, role={self.role})>"
+
+
+class HomeInviteModel(Base):
+    """
+    SQLAlchemy model for HomeInvite entity (OTP-style join codes).
+
+    Maps to 'home_invites' table. `code` is stored canonical: 8 uppercase
+    characters, no separators.
+    """
+    __tablename__ = 'home_invites'
+
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    home_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey('homes.home_id'), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default='member')
+    created_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    max_uses: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<HomeInviteModel(code={self.code}, home_id={self.home_id})>"
+
+
 class AlexaUserMappingModel(Base):
     """
     SQLAlchemy model for Alexa User to Home mapping.

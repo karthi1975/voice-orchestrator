@@ -7,7 +7,7 @@ Extends base repository with home-specific queries.
 
 from abc import abstractmethod
 from typing import Optional, List
-from app.domain.models import Home
+from app.domain.models import Home, HomeMember
 from app.repositories.base import IRepository
 
 
@@ -87,9 +87,32 @@ class IHomeRepository(IRepository[Home]):
             home_id: Home ID
 
         Returns:
-            True if home exists and belongs to user, False otherwise
+            True if the home exists and the user owns it OR is a member
         """
         pass
+
+    # ---- Membership (many-to-many users <-> homes) ----------------------
+    #
+    # Non-abstract for backward compatibility with third-party repositories;
+    # the shipped implementations override all three. `list_by_user` and
+    # `exists_for_user` MUST honour membership rows in addition to the
+    # legacy owner column — login and the per-home access check rely on it.
+
+    def add_member(self, home_id: str, user_id: str,
+                   role: str = "member") -> HomeMember:
+        """Grant `user_id` membership of `home_id` (idempotent; updates role).
+
+        Raises ValueError when the home does not exist.
+        """
+        raise NotImplementedError
+
+    def remove_member(self, home_id: str, user_id: str) -> bool:
+        """Revoke a membership. Returns False when no such membership."""
+        raise NotImplementedError
+
+    def list_members(self, home_id: str) -> List[HomeMember]:
+        """All memberships of a home, oldest first."""
+        raise NotImplementedError
 
     def set_ha_token(self, home_id: str, encrypted: Optional[str]) -> bool:
         """Store (or clear, with None) the encrypted HA token for a home.

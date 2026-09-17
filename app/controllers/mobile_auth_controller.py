@@ -16,9 +16,18 @@ from typing import Any, Tuple
 
 from flask import Blueprint, jsonify, request
 
+from app.services.home_invite_service import InvalidInviteError
 from app.services.mobile_auth_service import (MobileAuthService,
                                               PendingApprovalError,
                                               RateLimitedError)
+
+_INVITE_MESSAGES = {
+    "unknown": "That invite code is not valid. Check it and try again.",
+    "expired": "That invite code has expired. Ask HomeAdapt for a new one.",
+    "exhausted": "That invite code has already been used.",
+    "revoked": "That invite code was cancelled. Ask HomeAdapt for a new one.",
+    "home_inactive": "The home for that invite code is not active.",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +45,8 @@ class MobileAuthController:
         self.blueprint.add_url_rule("/auth/login", "mobile_login", self.login, methods=["POST"])
         self.blueprint.add_url_rule("/auth/change-password", "mobile_change_password",
                                     self.change_password, methods=["POST"])
+        self.blueprint.add_url_rule("/auth/redeem-invite", "mobile_redeem_invite",
+                                    self.redeem_invite, methods=["POST"])
         self.blueprint.add_url_rule("/me", "mobile_me", self.me, methods=["GET"])
 
     def _bearer(self) -> str:
@@ -43,13 +54,21 @@ class MobileAuthController:
         return hdr[7:].strip() if hdr.lower().startswith("bearer ") else ""
 
     def signup(self) -> Tuple[Any, int]:
-        """POST /auth/signup {"email": "...", "password": "...", "full_name": "..."}
+        """POST /auth/signup
+            {"email": "...", "password": "...", "full_name": "...",
+             "invite_code": "K7QX-4MRP"}            # optional
 
-        Creates a PENDING account (Tier 2: admin approval). The user cannot
-        log in until an admin activates the account and attaches their home.
+        Without invite_code: creates a PENDING account (Tier 2: admin
+        approval). The user cannot log in until an admin activates the
+        account and attaches their home.
+            201: {"status": "pending_approval", "email": "...", "message": "..."}
 
-        201: {"status": "pending_approval", "email": "...", "message": "..."}
-        400 VALIDATION / 409 EMAIL_EXISTS / 429 RATE_LIMITED
+        With a valid invite_code (admin-generated per home): the account is
+        created ACTIVE and attached to that home, and the response is the
+        same payload as /auth/login, so the app is signed in immediately.
+            201: {"status": "active", "token": "...", "homes": [...], ...}
+
+        400 VALIDATION / 400 INVALID_INVITE / 409 EMAIL_EXISTS / 429 RATE_LIMITED
         """
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
@@ -61,7 +80,15 @@ class MobileAuthController:
                 password=body.get("password"),
                 full_name=body.get("full_name"),
                 client_ip=request.remote_addr,
+                invite_code=body.get("invite_code"),
             )
+        except InvalidInviteError as e:
+            logger.warning(f"signup bad invite reason={e.reason} ip={request.remote_addr}")
+            return jsonify({
+                "error": _INVITE_MESSAGES.get(e.reason, _INVITE_MESSAGES["unknown"]),
+                "code": "INVALID_INVITE",
+                "reason": e.reason,
+            }), 400
         except RateLimitedError:
             logger.warning(f"signup rate-limited ip={request.remote_addr}")
             return jsonify({
@@ -76,12 +103,69 @@ class MobileAuthController:
                 }), 409
             return jsonify({"error": str(e), "code": "VALIDATION"}), 400
 
+        if user.is_active:
+            # Invite-code sign-up: already attached to a home — log them in.
+            issued = self._svc.issue_token(user.user_id)
+            logger.info(f"signup+invite ok user={user.user_id}")
+            return jsonify({
+                "status": "active",
+                "token": issued["token"],
+                "token_type": "Bearer",
+                "expires_in": issued["expires_in"],
+                **self._svc.bootstrap(user),
+            }), 201
+
         return jsonify({
             "status": "pending_approval",
             "email": user.email,
             "message": "Account created. HomeAdapt will contact you to complete "
                        "your home setup — you can log in once it's activated.",
         }), 201
+
+    def redeem_invite(self) -> Tuple[Any, int]:
+        """POST /auth/redeem-invite (JWT required)   {"invite_code": "K7QX-4MRP"}
+
+        Attaches the logged-in user to the invite's home. Returns the same
+        identity payload as GET /me (now including the new home) so the app
+        can refresh its cached homes list in one call.
+
+        200: bootstrap payload
+        400 VALIDATION / 400 INVALID_INVITE / 401 UNAUTHORIZED / 429 RATE_LIMITED
+        """
+        token = self._bearer()
+        user_id = self._svc.verify_token(token) if token else None
+        if user_id is None:
+            return jsonify({
+                "error": "Valid login token required. POST /auth/login first.",
+                "code": "UNAUTHORIZED",
+            }), 401
+
+        body = request.get_json(silent=True)
+        code = body.get("invite_code") if isinstance(body, dict) else None
+        if not isinstance(code, str) or not code.strip():
+            return jsonify({"error": "invite_code is required", "code": "VALIDATION"}), 400
+
+        try:
+            user = self._svc.redeem_invite(user_id, code, client_ip=request.remote_addr)
+        except InvalidInviteError as e:
+            logger.warning(f"redeem bad invite user={user_id} reason={e.reason}")
+            return jsonify({
+                "error": _INVITE_MESSAGES.get(e.reason, _INVITE_MESSAGES["unknown"]),
+                "code": "INVALID_INVITE",
+                "reason": e.reason,
+            }), 400
+        except RateLimitedError:
+            return jsonify({
+                "error": "Too many invalid codes. Try again later.",
+                "code": "RATE_LIMITED",
+            }), 429
+        except ValueError as e:
+            return jsonify({"error": str(e), "code": "VALIDATION"}), 400
+
+        if user is None:
+            return jsonify({"error": "Account is not active", "code": "UNAUTHORIZED"}), 401
+        logger.info(f"invite redeemed user={user_id}")
+        return jsonify(self._svc.bootstrap(user)), 200
 
     def login(self) -> Tuple[Any, int]:
         """POST /auth/login {"email": "...", "password": "..."}

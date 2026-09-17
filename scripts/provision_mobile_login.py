@@ -10,10 +10,10 @@ script guarantees that, without touching any favorites/enrollment rows:
   1. ensures a users row with user_id == <user-ref> exists
      (creates it if missing; existing rows are updated, never recreated)
   2. sets the login password (pbkdf2:sha256)
-  3. optionally re-points a home's owner (homes.user_id) to this user so
-     GET /me returns that home — this only changes the owner column on the
-     homes row; scenes, favorites and tokens reference home_id and are
-     unaffected
+  3. optionally attaches homes to this user via the home_members table so
+     GET /me returns them. Homes are SHARED, not transferred: existing
+     members (including the original owner) keep seeing the home. Scenes,
+     favorites and tokens reference home_id and are unaffected.
 
 Usage:
   DATABASE_URL=postgresql://... python scripts/provision_mobile_login.py \
@@ -37,7 +37,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from werkzeug.security import generate_password_hash
 
-from app.repositories.implementations.sqlalchemy_models import HomeModel, UserModel
+from app.repositories.implementations.sqlalchemy_models import (HomeMemberModel,
+                                                                HomeModel, UserModel)
 
 
 def main() -> int:
@@ -114,11 +115,14 @@ def main() -> int:
                   f"POST /admin/homes", file=sys.stderr)
             session.rollback()
             return 1
-        if home.user_id != user_ref:
-            changes.append(f"re-point home {home_id!r} owner {home.user_id!r} -> {user_ref!r}")
-            home.user_id = user_ref
+        membership = session.get(HomeMemberModel, (home.home_id, user_ref))
+        if membership is None:
+            role = "owner" if home.user_id == user_ref else "member"
+            session.add(HomeMemberModel(home_id=home.home_id, user_id=user_ref,
+                                        role=role, created_at=datetime.now()))
+            changes.append(f"add {user_ref!r} as {role} of home {home_id!r}")
         else:
-            changes.append(f"home {home_id!r} already owned by {user_ref!r}")
+            changes.append(f"{user_ref!r} already a {membership.role} of home {home_id!r}")
 
     print("Plan:" if args.dry_run else "Applying:")
     for c in changes:

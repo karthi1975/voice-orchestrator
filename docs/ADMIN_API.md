@@ -94,8 +94,14 @@ Mobile sign-ups awaiting activation (`POST /auth/signup` creates them inactive).
 
 **Endpoint:** `POST /admin/users/{user_id}/activate`
 
-After activating, attach the user's home (`POST /admin/homes` or
+After activating, attach the user's home (`POST /admin/homes/{home_id}/members`,
+`POST /admin/homes` for a brand-new home, or
 `scripts/provision_mobile_login.py --home <home_id>`) so `GET /me` returns it.
+
+**Shortcut — skip manual approval entirely:** generate an
+[invite code](#home-invite-codes-otp-style) for the home and give it to the
+user *before* they sign up. Entering it on the sign-up screen creates the
+account already active and attached to that home.
 
 ---
 
@@ -308,10 +314,200 @@ Get all homes for a specific user.
 
 **Endpoint:** `GET /admin/users/{user_id}/homes?active_only=true`
 
+Returns every home the user is a **member** of (owned or shared).
+
 **Query Parameters:**
 - `active_only` (boolean, default: true) - Filter to only active homes
 
 **Response:** `200 OK`
+
+---
+
+## Home Members (shared homes)
+
+A home can be listed for **several users at once** — a family, or two
+testers sharing a demo home. Membership lives in the `home_members` table;
+the user who registered the home is its `owner` member, anyone added later
+is a `member`. Both roles see the home at login and may use it from the app.
+Ownership is never transferred — adding a member never removes anyone.
+
+The mobile login token only allows access to homes the user is a member of
+(`403` otherwise), so membership is the access-control list for a home.
+
+### List Members
+
+**Endpoint:** `GET /admin/homes/{home_id}/members`
+
+**Response:** `200 OK`
+```json
+{
+  "home_id": "scott_home",
+  "count": 2,
+  "members": [
+    { "home_id": "scott_home", "user_id": "scott_mobile", "role": "owner",
+      "username": "scottmeyers", "email": "smeyersne@gmail.com",
+      "full_name": "Scott Meyers", "created_at": "2026-02-05T22:22:44" },
+    { "home_id": "scott_home", "user_id": "c31c3594-4721-43e0-9dd5-77f6c0dde4b5",
+      "role": "member", "username": "u0450254@umail.utah.edu",
+      "email": "u0450254@umail.utah.edu", "full_name": "u0450254",
+      "created_at": "2026-09-17T17:11:54" }
+  ]
+}
+```
+
+`404` — home not found.
+
+**Example:**
+```bash
+curl -s https://voiceorchestrator.homeadapt.us/admin/homes/scott_home/members \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN"
+```
+
+---
+
+### Add a Member
+
+**Endpoint:** `POST /admin/homes/{home_id}/members`
+
+Idempotent — re-adding an existing member just updates their role.
+
+**Request Body:**
+```json
+{ "user_id": "scott_mobile", "role": "member" }
+```
+
+- `user_id` (required) — an existing user
+- `role` (optional) — `member` (default) or `owner`
+
+**Response:** `201 Created` — the membership row (same shape as in List Members)
+
+Errors: `400` unknown user / bad role, `404` home not found.
+
+**Example — give Scott and Aaron the same two test homes:**
+```bash
+ADMIN_API_TOKEN=...   # from the server .env
+BASE=https://voiceorchestrator.homeadapt.us
+
+for HOME in scott_home ne_qli_1; do
+  for USER in scott_mobile c31c3594-4721-43e0-9dd5-77f6c0dde4b5; do
+    curl -s -X POST "$BASE/admin/homes/$HOME/members" \
+      -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"user_id\": \"$USER\"}"
+    echo
+  done
+done
+```
+
+---
+
+### Remove a Member
+
+**Endpoint:** `DELETE /admin/homes/{home_id}/members/{user_id}`
+
+The user stops seeing the home at login and their token can no longer act
+on it. Their favorites/enrollments for that home are left in place.
+
+**Response:** `200 OK`
+```json
+{ "removed": true, "home_id": "scott_home", "user_id": "scott_mobile" }
+```
+
+`404` — home not found, or the user was not a member.
+
+---
+
+## Home Invite Codes (OTP-style)
+
+An invite code lets a user attach themselves to a home **without a manual
+approval round-trip**. You generate a code for a specific home, send it to
+the person (text, email, in person), and they either:
+
+- enter it on the app **sign-up screen** → the account is created **active**
+  and attached to the home in one step (no `PENDING_APPROVAL`), or
+- enter it in the app's **"Join a home"** screen while logged in
+  (`POST /auth/redeem-invite`) → the home is added to their existing account.
+
+Code format: 8 characters shown as `XXXX-XXXX` (e.g. `K7QX-4MRP`). The
+alphabet has no `0/O` or `1/I`, and the user may type it in any case with or
+without the dash. Defaults: **single use, valid 7 days**. Guessing is
+throttled — 5 bad codes from one IP (or one account) locks that source out
+for 15 minutes.
+
+### Generate an Invite Code
+
+**Endpoint:** `POST /admin/homes/{home_id}/invites`
+
+**Request Body** (all fields optional):
+```json
+{ "role": "member", "expires_in_hours": 168, "max_uses": 1 }
+```
+
+- `role` — role granted on redeem: `member` (default) or `owner`
+- `expires_in_hours` — 1 to 8760 (default 168 = 7 days)
+- `max_uses` — 1 to 100 (default 1). Use e.g. `4` for a family sharing one code.
+
+Optional header `X-Admin-User: <your name>` is stored as `created_by`.
+
+**Response:** `201 Created`
+```json
+{
+  "code": "K7QX-4MRP",
+  "home_id": "scott_home",
+  "role": "member",
+  "status": "active",
+  "created_by": "karthi",
+  "created_at": "2026-09-17T18:00:00",
+  "expires_at": "2026-09-24T18:00:00",
+  "max_uses": 1,
+  "use_count": 0,
+  "revoked_at": null
+}
+```
+
+Errors: `400` out-of-range settings, `404` home not found,
+`503` invite codes not enabled on this server.
+
+**Example — code for Aaron to join `ne_qli_1`:**
+```bash
+curl -s -X POST "$BASE/admin/homes/ne_qli_1/invites" \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+  -H "X-Admin-User: karthi" \
+  -H "Content-Type: application/json" \
+  -d '{"max_uses": 1, "expires_in_hours": 72}'
+```
+
+**Admin dashboard:** on the *Homes* tab each row has an **Invite** button
+that asks for uses + days, generates the code, copies it to the clipboard and
+shows it in a copyable box. The **Members** button lists who sees the home
+and lets you add (`user_id`) or remove (`-user_id`) a member.
+
+---
+
+### List Invite Codes for a Home
+
+**Endpoint:** `GET /admin/homes/{home_id}/invites?status=active`
+
+Newest first. `status` filter is optional: `active` | `expired` |
+`exhausted` | `revoked`.
+
+**Response:** `200 OK` — `{"home_id": "...", "invites": [...], "count": n}`
+(each item has the shape shown under *Generate*).
+
+---
+
+### Revoke an Invite Code
+
+**Endpoint:** `DELETE /admin/invites/{code}`
+
+Cancels a code early (idempotent). Accepts the code with or without the dash.
+
+**Response:** `200 OK` — the invite with `"status": "revoked"`. `404` unknown code.
+
+```bash
+curl -s -X DELETE "$BASE/admin/invites/K7QX-4MRP" \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN"
+```
 
 ---
 

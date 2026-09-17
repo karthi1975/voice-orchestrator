@@ -18,6 +18,8 @@ Handles VAPI tool-call webhooks. Two flows coexist:
 The VAPI system prompt decides which flow by whether automation_id is set.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os

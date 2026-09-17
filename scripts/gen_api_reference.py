@@ -205,7 +205,8 @@ def build():
     add(h1("Endpoint index"))
     add(table([
         ["Group", "Endpoints"],
-        ["Identity", "POST /auth/signup · POST /auth/login · GET /me · POST /auth/change-password"],
+        ["Identity", "POST /auth/signup · POST /auth/login · GET /me · POST /auth/change-password · "
+         "POST /auth/redeem-invite"],
         ["Enrollments (voice-gate)", "POST/GET /enrollments · GET/DELETE /enrollments/{id} · "
          "PATCH /enrollments/{id}/status · GET /check · GET /voice-gated · "
          "GET /challenges · GET /challenges/{id}"],
@@ -222,12 +223,19 @@ def build():
 
     # ---- 1 identity --------------------------------------------------------
     add(h1("1 · Identity"))
-    one(h2("POST /auth/signup — create account (pending approval)"))
+    one(h2("POST /auth/signup — create account (invite code, or pending approval)"))
     add(code('curl -s -X POST "$BASE/auth/signup" -H "Content-Type: application/json" \\\n'
-             '  -d \'{"email":"new@example.com","password":"min-8-chars","full_name":"New User"}\''))
-    one(para("201 pending_approval (admin activates + attaches home before login works) · "
-             "409 EMAIL_EXISTS · 400 VALIDATION · 429 RATE_LIMITED (5/15 min/IP). "
-             "Login before activation → 403 PENDING_APPROVAL."))
+             '  -d \'{"email":"new@example.com","password":"min-8-chars","full_name":"New User",\n'
+             '       "invite_code":"K7QX-4MRP"}\'   # invite_code is OPTIONAL'))
+    one(para("<b>With a valid invite_code</b> (8-char code HomeAdapt generates per home; any "
+             "case, dash optional): 201 status=active <b>plus the full login payload</b> "
+             "(token, user_ref, homes, default_home_id) — the account is active and attached "
+             "to that home; treat it as a successful login. "
+             "<b>Without invite_code</b>: 201 pending_approval (admin activates + attaches "
+             "home before login works); login before activation → 403 PENDING_APPROVAL. "
+             "Errors: 400 INVALID_INVITE (reason = unknown | expired | exhausted | revoked | "
+             "home_inactive; nothing is created) · 409 EMAIL_EXISTS · 400 VALIDATION · "
+             "429 RATE_LIMITED (5 sign-ups or 5 bad codes / 15 min / IP)."))
 
     one(h2("POST /auth/login — get token + identity in one call"))
     add(code('curl -s -X POST "$BASE/auth/login" -H "Content-Type: application/json" \\\n'
@@ -282,6 +290,15 @@ def build():
              '  -d \'{"current_password":"old-one","new_password":"new-min-8-chars"}\''))
     one(para("204 changed (token stays valid) · 403 wrong current password · 400 policy · "
              "429 lockout. Forgotten password: admin reset only (for now)."))
+
+    one(h2("POST /auth/redeem-invite — join another home with an invite code"))
+    add(code('curl -s -X POST "$BASE/auth/redeem-invite" -H "Authorization: Bearer $TOKEN" \\\n'
+             '  -H "Content-Type: application/json" -d \'{"invite_code":"K7QX-4MRP"}\''))
+    one(para("For an already logged-in user (a second tester joining a shared demo home, a "
+             "family member being added). 200 → the GET /me payload with the new home in "
+             "homes[]; default_home_id is unchanged, so switch selectedHomeId yourself if "
+             "wanted. Homes are shared, not transferred: other members keep seeing the home. "
+             "400 INVALID_INVITE (+ reason) · 400 VALIDATION · 401 · 429 after 5 bad codes."))
 
     # ---- 2 enrollments -----------------------------------------------------
     add(h1("2 · Voice-auth enrollments (gate an automation behind a spoken phrase)"))
@@ -604,6 +621,7 @@ def build():
         ["HTTP", "Code", "Meaning", "App action"],
         ["400", "VALIDATION", "bad body/params", "fix input, inline error"],
         ["400", "NO_CONTROLLABLE_ENTITY", "sensor-only device", "exclude from picker"],
+        ["400", "INVALID_INVITE", "invite code unknown/expired/used/revoked (reason field)", "show reason; re-enter or clear code"],
         ["401", "UNAUTHORIZED", "missing/expired token or bad key", "re-login (token) / config bug (key)"],
         ["403", "FORBIDDEN", "foreign user_ref or home_id with a token", "app bug — use own identity"],
         ["403", "PENDING_APPROVAL", "account awaiting activation", "show “awaiting activation”"],
@@ -613,7 +631,7 @@ def build():
         ["409", "ENROLLMENT_REQUIRED", "voice-gated (always locks)", "launch VAPI session"],
         ["409", "EMAIL_EXISTS", "signup email taken", "offer login"],
         ["409", "DASHBOARD_NOT_CONFIGURED", "board never saved in HA", "tell user to save it once in HA"],
-        ["429", "RATE_LIMITED", "login/signup lockout (15 min)", "“try later”, no auto-retry"],
+        ["429", "RATE_LIMITED", "login/signup/invite-code lockout (15 min)", "“try later”, no auto-retry"],
         ["502", "— / VAPI_ERROR", "HA or VAPI upstream failure", "retry once with backoff"],
         ["503", "HOME_UNREACHABLE", "home's HA down or token lapsed", "“home offline, retry later”"],
         ["503", "NOT_CONFIGURED", "feature not wired", "report to backend"],

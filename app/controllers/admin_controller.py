@@ -17,7 +17,10 @@ from app.services.user_service import UserService
 from app.services.home_service import HomeService
 from app.services.alexa_mapping_service import AlexaMappingService
 from app.services.scene_webhook_mapping_service import SceneWebhookMappingService
+from app.services.home_invite_service import HomeInviteService
 from app.dto.requests.admin_request import (
+    AddHomeMemberRequest,
+    CreateHomeInviteRequest,
     CreateUserRequest,
     UpdateUserRequest,
     CreateHomeRequest,
@@ -28,6 +31,8 @@ from app.dto.requests.admin_request import (
     UpdateSceneWebhookMappingRequest
 )
 from app.dto.responses.admin_response import (
+    HomeInviteResponse,
+    HomeMemberResponse,
     UserResponse,
     HomeResponse,
     UserListResponse,
@@ -57,7 +62,8 @@ class AdminController(BaseController):
         user_service: UserService,
         home_service: HomeService,
         alexa_mapping_service: AlexaMappingService,
-        scene_mapping_service: SceneWebhookMappingService = None
+        scene_mapping_service: SceneWebhookMappingService = None,
+        invite_service: Optional[HomeInviteService] = None
     ):
         """
         Initialize admin controller.
@@ -73,6 +79,7 @@ class AdminController(BaseController):
         self._home_service = home_service
         self._alexa_mapping_service = alexa_mapping_service
         self._scene_mapping_service = scene_mapping_service
+        self._invite_service = invite_service
         self._register_routes()
 
     def _register_routes(self) -> None:
@@ -188,6 +195,46 @@ class AdminController(BaseController):
             'toggle_test_mode',
             self.toggle_test_mode,
             methods=['POST']
+        )
+
+        # Shared-home membership endpoints
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/members',
+            'list_home_members',
+            self.list_home_members,
+            methods=['GET']
+        )
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/members',
+            'add_home_member',
+            self.add_home_member,
+            methods=['POST']
+        )
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/members/<user_id>',
+            'remove_home_member',
+            self.remove_home_member,
+            methods=['DELETE']
+        )
+
+        # Invite code (OTP-style) endpoints
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/invites',
+            'create_home_invite',
+            self.create_home_invite,
+            methods=['POST']
+        )
+        self.blueprint.add_url_rule(
+            '/homes/<home_id>/invites',
+            'list_home_invites',
+            self.list_home_invites,
+            methods=['GET']
+        )
+        self.blueprint.add_url_rule(
+            '/invites/<code>',
+            'revoke_home_invite',
+            self.revoke_home_invite,
+            methods=['DELETE']
         )
 
         # Alexa mapping endpoints
@@ -827,6 +874,161 @@ class AdminController(BaseController):
 
         response = HomeListResponse.from_models(homes)
         return self.json_response(response.to_dict(), 200)
+
+    # ========== Shared-home membership ==========
+
+    def _member_dict(self, member) -> dict:
+        try:
+            user = self._user_service.get_user(member.user_id)
+        except ValueError:
+            user = None  # user row deleted; still show the membership
+        return HomeMemberResponse.from_model(member, user).to_dict()
+
+    def list_home_members(self, home_id: str) -> Tuple[Any, int]:
+        """
+        GET /admin/homes/{home_id}/members - Users who see this home at login.
+
+        Returns:
+            200: {"home_id": "...", "members": [...], "count": n}
+            404: Home not found
+        """
+        self.log_request(f'list_home_members:{home_id}')
+        try:
+            members = self._home_service.list_members(home_id)
+        except ValueError as e:
+            return self.error_response(str(e), 404)
+        items = [self._member_dict(m) for m in members]
+        return self.json_response({"home_id": home_id, "members": items,
+                                   "count": len(items)}, 200)
+
+    def add_home_member(self, home_id: str) -> Tuple[Any, int]:
+        """
+        POST /admin/homes/{home_id}/members - Attach a user to a home.
+
+        Request body: {"user_id": "...", "role": "member"|"owner"}
+        Idempotent: re-adding an existing member just updates the role.
+
+        Returns:
+            201: Membership row
+            400: Validation error / unknown user
+            404: Home not found
+        """
+        self.log_request(f'add_home_member:{home_id}')
+        try:
+            req = AddHomeMemberRequest.from_dict(self.get_request_json())
+            req.validate()
+            member = self._home_service.add_member(home_id, req.user_id, req.role)
+            logger.info(f"Home member added: home={home_id} user={req.user_id} role={req.role}")
+            return self.json_response(self._member_dict(member), 201)
+        except ValueError as e:
+            msg = str(e)
+            return self.error_response(msg, 404 if msg.startswith("Home with ID") else 400)
+
+    def remove_home_member(self, home_id: str, user_id: str) -> Tuple[Any, int]:
+        """
+        DELETE /admin/homes/{home_id}/members/{user_id} - Detach a user.
+
+        Returns:
+            200: {"removed": true, "home_id": ..., "user_id": ...}
+            404: Home not found / user was not a member
+        """
+        self.log_request(f'remove_home_member:{home_id}:{user_id}')
+        try:
+            removed = self._home_service.remove_member(home_id, user_id)
+        except ValueError as e:
+            return self.error_response(str(e), 404)
+        if not removed:
+            return self.error_response(
+                f"User '{user_id}' is not a member of home '{home_id}'", 404)
+        logger.info(f"Home member removed: home={home_id} user={user_id}")
+        return self.json_response({"removed": True, "home_id": home_id,
+                                   "user_id": user_id}, 200)
+
+    # ========== Invite codes (OTP-style) ==========
+
+    def _invites_enabled(self) -> Optional[Tuple[Any, int]]:
+        if self._invite_service is None:
+            return self.error_response("Invite codes are not enabled on this server", 503)
+        return None
+
+    def create_home_invite(self, home_id: str) -> Tuple[Any, int]:
+        """
+        POST /admin/homes/{home_id}/invites - Generate an invite code.
+
+        Request body (all optional):
+            {"role": "member", "expires_in_hours": 168, "max_uses": 1}
+
+        Give the returned `code` (XXXX-XXXX) to the user. They enter it on
+        the sign-up screen (account created active + attached to this home)
+        or redeem it later via POST /auth/redeem-invite.
+
+        Returns:
+            201: Invite (incl. code, expires_at, status)
+            400: Validation error
+            404: Home not found
+        """
+        self.log_request(f'create_home_invite:{home_id}')
+        err = self._invites_enabled()
+        if err:
+            return err
+        try:
+            data = request.get_json(silent=True) or {}
+            req = CreateHomeInviteRequest.from_dict(data)
+            req.validate()
+            created_by = getattr(request, 'admin_identity', None) or \
+                request.headers.get('X-Admin-User') or 'admin'
+            invite = self._invite_service.create_invite(
+                home_id, role=req.role, expires_in_hours=req.expires_in_hours,
+                max_uses=req.max_uses, created_by=created_by)
+            return self.json_response(HomeInviteResponse.from_model(invite).to_dict(), 201)
+        except ValueError as e:
+            msg = str(e)
+            return self.error_response(msg, 404 if msg.startswith("Home with ID") else 400)
+
+    def list_home_invites(self, home_id: str) -> Tuple[Any, int]:
+        """
+        GET /admin/homes/{home_id}/invites - All codes for a home, newest first.
+
+        Query parameters:
+            status: optional filter (active|expired|exhausted|revoked)
+
+        Returns:
+            200: {"home_id": "...", "invites": [...], "count": n}
+            404: Home not found
+        """
+        self.log_request(f'list_home_invites:{home_id}')
+        err = self._invites_enabled()
+        if err:
+            return err
+        try:
+            invites = self._invite_service.list_invites(home_id)
+        except ValueError as e:
+            return self.error_response(str(e), 404)
+        wanted = (request.args.get('status') or '').strip().lower()
+        items = [HomeInviteResponse.from_model(i).to_dict() for i in invites]
+        if wanted:
+            items = [i for i in items if i['status'] == wanted]
+        return self.json_response({"home_id": home_id, "invites": items,
+                                   "count": len(items)}, 200)
+
+    def revoke_home_invite(self, code: str) -> Tuple[Any, int]:
+        """
+        DELETE /admin/invites/{code} - Revoke a code early (idempotent).
+
+        Returns:
+            200: Invite with status "revoked"
+            404: Unknown code
+        """
+        self.log_request(f'revoke_home_invite:{code}')
+        err = self._invites_enabled()
+        if err:
+            return err
+        try:
+            invite = self._invite_service.revoke_invite(code)
+        except ValueError as e:
+            return self.error_response(str(e), 404)
+        logger.info(f"Invite revoked: {invite.display_code} home={invite.home_id}")
+        return self.json_response(HomeInviteResponse.from_model(invite).to_dict(), 200)
 
     def toggle_test_mode(self, home_id: str) -> Tuple[Any, int]:
         """

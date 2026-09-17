@@ -5,6 +5,8 @@ Thin HTTP layer for FutureProof Homes integration.
 All business logic delegated to services.
 """
 
+from __future__ import annotations
+
 import logging
 from app.controllers.base_controller import BaseController
 from app.dto.requests.fph_request import FPHAuthRequest, FPHVerifyRequest, FPHCancelRequest

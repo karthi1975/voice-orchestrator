@@ -1363,6 +1363,14 @@
                                 <span class="material-icons">key</span>
                                 Token
                             </button>
+                            <button class="btn btn-secondary btn-small" onclick="createHomeInvite('${home.home_id}')" title="Generate an OTP-style invite code: the user types it at sign-up and is attached to this home with no manual approval">
+                                <span class="material-icons">vpn_key</span>
+                                Invite
+                            </button>
+                            <button class="btn btn-secondary btn-small" onclick="viewHomeMembers('${home.home_id}')" title="Users who see this home at login (add / remove)">
+                                <span class="material-icons">group</span>
+                                Members
+                            </button>
                             <button class="btn btn-secondary btn-small" onclick="testHomeConnection('${home.home_id}')" title="Live check: can the orchestrator reach this HA with its token?">
                                 <span class="material-icons">wifi_tethering</span>
                                 Test HA
@@ -1426,6 +1434,90 @@
             } catch (error) {
                 console.error('Error storing token:', error);
                 showAlert('Failed to store token', 'error');
+            }
+        }
+
+        // ---- Shared homes: invite codes + members ----------------------
+
+        async function createHomeInvite(homeId) {
+            const usesRaw = prompt(
+                `Invite code for "${homeId}"\n\n` +
+                'How many people may use this code? (1-100)\n' +
+                'Use 1 for a single person, more for a family sharing one code.', '1');
+            if (usesRaw === null) return;
+            const daysRaw = prompt('Valid for how many days? (1-365)', '7');
+            if (daysRaw === null) return;
+            const maxUses = parseInt(usesRaw, 10);
+            const days = parseInt(daysRaw, 10);
+            if (!(maxUses >= 1 && maxUses <= 100) || !(days >= 1 && days <= 365)) {
+                showAlert('Uses must be 1-100 and days 1-365', 'error');
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE}/homes/${homeId}/invites`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ max_uses: maxUses, expires_in_hours: days * 24 })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    showAlert(data.error || 'Failed to create invite', 'error');
+                    return;
+                }
+                try { await navigator.clipboard.writeText(data.code); } catch (e) { /* no clipboard */ }
+                const expires = data.expires_at ? new Date(data.expires_at).toLocaleString() : 'never';
+                // A prompt() with the code pre-filled makes it easy to copy.
+                prompt(
+                    `Invite code for "${homeId}" (copied to clipboard)\n` +
+                    `Uses: ${data.max_uses}   Expires: ${expires}\n\n` +
+                    'Send this to the user. They enter it on the app sign-up screen ' +
+                    '(or in "Join a home" if they already have an account).',
+                    data.code);
+                showAlert(`Invite ${data.code} created for ${homeId}`, 'success');
+            } catch (error) {
+                console.error('Error creating invite:', error);
+                showAlert('Failed to create invite', 'error');
+            }
+        }
+
+        async function viewHomeMembers(homeId) {
+            try {
+                const response = await fetch(`${API_BASE}/homes/${homeId}/members`);
+                const data = await response.json();
+                if (!response.ok) {
+                    showAlert(data.error || 'Failed to load members', 'error');
+                    return;
+                }
+                const lines = data.members.length
+                    ? data.members.map(m => `  ${m.user_id}  (${m.role}${m.email ? ', ' + m.email : ''})`).join('\n')
+                    : '  (nobody yet)';
+                const answer = prompt(
+                    `Members of "${homeId}" — these users see it at login:\n${lines}\n\n` +
+                    'To ADD a user type their user_id.\n' +
+                    'To REMOVE a user type -user_id (leading minus).\n' +
+                    'Leave empty to close.', '');
+                if (answer === null || !answer.trim()) return;
+                const value = answer.trim();
+                if (value.startsWith('-')) {
+                    const userId = value.slice(1).trim();
+                    if (!confirm(`Remove ${userId} from "${homeId}"? They will no longer see this home.`)) return;
+                    const rv = await fetch(`${API_BASE}/homes/${homeId}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+                    const body = await rv.json();
+                    showAlert(rv.ok ? `${userId} removed from ${homeId}` : (body.error || 'Failed to remove member'),
+                              rv.ok ? 'success' : 'error');
+                } else {
+                    const rv = await fetch(`${API_BASE}/homes/${homeId}/members`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: value, role: 'member' })
+                    });
+                    const body = await rv.json();
+                    showAlert(rv.ok ? `${value} added to ${homeId}` : (body.error || 'Failed to add member'),
+                              rv.ok ? 'success' : 'error');
+                }
+            } catch (error) {
+                console.error('Error managing members:', error);
+                showAlert('Failed to manage members', 'error');
             }
         }
 

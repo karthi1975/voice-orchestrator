@@ -212,6 +212,9 @@ from app.controllers.mobile_auth_controller import MobileAuthController
 mobile_auth_service = MobileAuthService(
     user_repository=container.user_repository,
     home_repository=container.home_repository,
+    # Invite codes (admin-generated per home) let sign-up skip the manual
+    # approval step; see HomeInviteService.
+    invite_service=container.home_invite_service,
 )
 mobile_auth_controller = MobileAuthController(service=mobile_auth_service)
 app.register_blueprint(mobile_auth_controller.blueprint)
@@ -222,8 +225,8 @@ app.register_blueprint(mobile_auth_controller.blueprint)
 attach_mobile_api_key_auth(
     voice_auth_controller.blueprint,
     token_verifier=mobile_auth_service.verify_token,
-    # JWT callers may only touch homes they own (per the homes table).
-    # Static-key callers are unaffected.
+    # JWT callers may only touch homes they are a member of (home_members;
+    # owners are members too). Static-key callers are unaffected.
     is_home_owner=container.home_repository.exists_for_user,
 )
 app.register_blueprint(voice_auth_controller.blueprint)

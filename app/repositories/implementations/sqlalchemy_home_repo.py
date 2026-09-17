@@ -7,11 +7,12 @@ Provides persistent storage using PostgreSQL.
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete
 
-from app.domain.models import Home
+from app.domain.models import Home, HomeMember, HOME_ROLE_OWNER
 from app.repositories.home_repository import IHomeRepository
-from app.repositories.implementations.sqlalchemy_models import HomeModel
+from app.repositories.implementations.sqlalchemy_models import (
+    HomeInviteModel, HomeMemberModel, HomeModel)
 
 
 class SQLAlchemyHomeRepository(IHomeRepository):
@@ -95,6 +96,10 @@ class SQLAlchemyHomeRepository(IHomeRepository):
 
         model = self._to_model(home)
         self._session.add(model)
+        # The registering user is the home's first member (role owner).
+        self._session.add(HomeMemberModel(
+            home_id=home.home_id, user_id=home.user_id,
+            role=HOME_ROLE_OWNER, created_at=home.created_at or datetime.now()))
         self._session.commit()
         self._session.refresh(model)
 
@@ -109,10 +114,23 @@ class SQLAlchemyHomeRepository(IHomeRepository):
         """Get home by home_id (alias for get_by_id)."""
         return self.get_by_id(home_id)
 
+    @staticmethod
+    def _accessible_by(user_id: str):
+        """Filter: homes the user is a member of.
+
+        Membership is the single source of truth. Every owner has a
+        membership row (migration 011 backfilled existing homes; add()
+        inserts one for new homes), so the legacy homes.user_id column is
+        not consulted — that is what makes remove_member() meaningful.
+        """
+        member_home_ids = select(HomeMemberModel.home_id).where(
+            HomeMemberModel.user_id == user_id)
+        return HomeModel.home_id.in_(member_home_ids)
+
     def get_by_user_id(self, user_id: str) -> List[Home]:
-        """Get all homes for a specific user."""
+        """Get all homes the user is a member of."""
         stmt = select(HomeModel).where(
-            HomeModel.user_id == user_id
+            self._accessible_by(user_id)
         ).order_by(HomeModel.created_at.desc())
         models = self._session.execute(stmt).scalars().all()
         return [self._to_domain(model) for model in models]
@@ -142,6 +160,11 @@ class SQLAlchemyHomeRepository(IHomeRepository):
         if not model:
             return False
 
+        # Dependent rows first (FKs): memberships and invite codes.
+        self._session.execute(sa_delete(HomeMemberModel).where(
+            HomeMemberModel.home_id == home_id))
+        self._session.execute(sa_delete(HomeInviteModel).where(
+            HomeInviteModel.home_id == home_id))
         self._session.delete(model)
         self._session.commit()
         return True
@@ -161,8 +184,8 @@ class SQLAlchemyHomeRepository(IHomeRepository):
         return [self._to_domain(model) for model in models]
 
     def list_by_user(self, user_id: str, active_only: bool = True) -> List[Home]:
-        """List homes for a specific user with optional active filter."""
-        stmt = select(HomeModel).where(HomeModel.user_id == user_id)
+        """List homes the user is a member of, with optional active filter."""
+        stmt = select(HomeModel).where(self._accessible_by(user_id))
 
         if active_only:
             stmt = stmt.where(HomeModel.is_active == True)
@@ -176,13 +199,52 @@ class SQLAlchemyHomeRepository(IHomeRepository):
         return self._session.get(HomeModel, home_id) is not None
 
     def exists_for_user(self, user_id: str, home_id: str) -> bool:
-        """Check if a specific home exists for a user."""
-        stmt = select(HomeModel).where(
-            HomeModel.user_id == user_id,
-            HomeModel.home_id == home_id
+        """True when the home exists and the user is a member of it."""
+        stmt = select(HomeModel.home_id).where(
+            HomeModel.home_id == home_id,
+            self._accessible_by(user_id)
         )
         result = self._session.execute(stmt).scalar_one_or_none()
         return result is not None
+
+    # ---- Membership ----------------------------------------------------
+
+    @staticmethod
+    def _member_to_domain(m: HomeMemberModel) -> HomeMember:
+        return HomeMember(home_id=m.home_id, user_id=m.user_id,
+                          role=m.role, created_at=m.created_at)
+
+    def add_member(self, home_id: str, user_id: str,
+                   role: str = "member") -> HomeMember:
+        """Grant membership (idempotent; an existing row just gets the role)."""
+        if not self.exists(home_id):
+            raise ValueError(f"Home with ID '{home_id}' not found")
+        model = self._session.get(HomeMemberModel, (home_id, user_id))
+        if model is None:
+            model = HomeMemberModel(home_id=home_id, user_id=user_id,
+                                    role=role, created_at=datetime.now())
+            self._session.add(model)
+        elif model.role != role:
+            model.role = role
+        self._session.commit()
+        return self._member_to_domain(model)
+
+    def remove_member(self, home_id: str, user_id: str) -> bool:
+        """Revoke a membership. The legacy owner column is left untouched."""
+        model = self._session.get(HomeMemberModel, (home_id, user_id))
+        if model is None:
+            return False
+        self._session.delete(model)
+        self._session.commit()
+        return True
+
+    def list_members(self, home_id: str) -> List[HomeMember]:
+        """All memberships of a home, oldest first."""
+        stmt = select(HomeMemberModel).where(
+            HomeMemberModel.home_id == home_id
+        ).order_by(HomeMemberModel.created_at.asc(), HomeMemberModel.user_id.asc())
+        return [self._member_to_domain(m)
+                for m in self._session.execute(stmt).scalars().all()]
 
     def deactivate(self, home_id: str) -> bool:
         """Deactivate a home (soft delete)."""
