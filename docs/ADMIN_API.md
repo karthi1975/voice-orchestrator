@@ -172,11 +172,27 @@ Update user details.
 {
   "username": "new_username",
   "full_name": "New Name",
-  "email": "new@example.com"
+  "email": "new@example.com",
+  "default_home_id": "ne_qli_1"
 }
 ```
 
-**Response:** `200 OK` or `404 Not Found`
+`default_home_id` is the home the mobile app opens first (what login returns
+as `default_home_id`). It must be an **active home the user is a member of**
+(`400` otherwise, `404` if the home does not exist). Send `null` to clear it,
+in which case login falls back to the user's first-registered home. If the
+user later loses access to that home the server falls back automatically —
+nothing to clean up. Also available from the dashboard: the pin icon on a
+user row. Users can set it themselves with `PATCH /me` from the app.
+
+```bash
+curl -s -X PUT "$BASE/admin/users/scott_mobile" \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"default_home_id": "ne_qli_1"}'
+```
+
+**Response:** `200 OK` (user, incl. `default_home_id`) or `404 Not Found`
 
 ---
 

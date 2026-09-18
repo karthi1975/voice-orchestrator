@@ -48,6 +48,7 @@ class MobileAuthController:
         self.blueprint.add_url_rule("/auth/redeem-invite", "mobile_redeem_invite",
                                     self.redeem_invite, methods=["POST"])
         self.blueprint.add_url_rule("/me", "mobile_me", self.me, methods=["GET"])
+        self.blueprint.add_url_rule("/me", "mobile_update_me", self.update_me, methods=["PATCH"])
 
     def _bearer(self) -> str:
         hdr = request.headers.get("Authorization", "")
@@ -301,4 +302,38 @@ class MobileAuthController:
         if user is None or not user.is_active:
             return jsonify({"error": "User not found or inactive", "code": "UNAUTHORIZED"}), 401
 
+        return jsonify(self._svc.bootstrap(user)), 200
+
+    def update_me(self) -> Tuple[Any, int]:
+        """PATCH /me (JWT required)   {"default_home_id": "ne_qli_1"}
+
+        Sets the home the app should open first. It must be one of the
+        caller's active homes. Send null to go back to "no preference"
+        (oldest home). Returns the refreshed identity payload, same as GET /me.
+
+        200 bootstrap / 400 VALIDATION / 401 UNAUTHORIZED
+        """
+        token = self._bearer()
+        user_id = self._svc.verify_token(token) if token else None
+        if user_id is None:
+            return jsonify({
+                "error": "Valid login token required. POST /auth/login first.",
+                "code": "UNAUTHORIZED",
+            }), 401
+
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or "default_home_id" not in body:
+            return jsonify({"error": "default_home_id is required (string or null)",
+                            "code": "VALIDATION"}), 400
+        home_id = body["default_home_id"]
+        if home_id is not None and (not isinstance(home_id, str) or not home_id.strip()):
+            return jsonify({"error": "default_home_id must be a home_id or null",
+                            "code": "VALIDATION"}), 400
+
+        try:
+            user = self._svc.set_default_home(user_id, home_id)
+        except ValueError as e:
+            return jsonify({"error": str(e), "code": "VALIDATION"}), 400
+        if user is None:
+            return jsonify({"error": "User not found or inactive", "code": "UNAUTHORIZED"}), 401
         return jsonify(self._svc.bootstrap(user)), 200

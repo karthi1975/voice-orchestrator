@@ -185,7 +185,9 @@ class UserService:
         user_id: str,
         username: Optional[str] = None,
         full_name: Optional[str] = None,
-        email: Optional[str] = None
+        email: Optional[str] = None,
+        default_home_id: Optional[str] = None,
+        clear_default_home: bool = False
     ) -> User:
         """
         Update user details.
@@ -195,6 +197,9 @@ class UserService:
             username: New username (optional)
             full_name: New full name (optional)
             email: New email (optional)
+            default_home_id: New preferred home (optional). Membership is
+                validated by the caller (HomeService.validate_home_access).
+            clear_default_home: True resets the preference to "no preference"
 
         Returns:
             Updated user
@@ -217,7 +222,8 @@ class UserService:
                 email=email if email is not None else user.email,
                 is_active=user.is_active,
                 created_at=user.created_at,
-                password_hash=user.password_hash
+                password_hash=user.password_hash,
+                default_home_id=user.default_home_id
             )
         elif full_name is not None or email is not None:
             user = User(
@@ -227,8 +233,14 @@ class UserService:
                 email=email if email is not None else user.email,
                 is_active=user.is_active,
                 created_at=user.created_at,
-                password_hash=user.password_hash
+                password_hash=user.password_hash,
+                default_home_id=user.default_home_id
             )
+
+        if clear_default_home:
+            user.default_home_id = None
+        elif default_home_id is not None:
+            user.default_home_id = default_home_id
 
         return self._repository.update(user)
 

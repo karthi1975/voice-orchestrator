@@ -93,6 +93,9 @@ class User:
         is_active: Whether the user account is active
         created_at: When the user was created
         password_hash: Hashed login password for mobile app login (None = login disabled)
+        default_home_id: Preferred home to open first (None = oldest home the
+            user belongs to). Only honoured while the user is still a member
+            of that home and it is active — see MobileAuthService.bootstrap.
     """
     user_id: str
     username: str
@@ -101,6 +104,7 @@ class User:
     created_at: datetime = field(default_factory=datetime.now)
     email: Optional[str] = None
     password_hash: Optional[str] = None
+    default_home_id: Optional[str] = None
 
     def check_password(self, password: str) -> bool:
         """Verify a plain-text password against the stored hash."""

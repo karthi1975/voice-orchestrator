@@ -205,7 +205,7 @@ def build():
     add(h1("Endpoint index"))
     add(table([
         ["Group", "Endpoints"],
-        ["Identity", "POST /auth/signup · POST /auth/login · GET /me · POST /auth/change-password · "
+        ["Identity", "POST /auth/signup · POST /auth/login · GET/PATCH /me · POST /auth/change-password · "
          "POST /auth/redeem-invite"],
         ["Enrollments (voice-gate)", "POST/GET /enrollments · GET/DELETE /enrollments/{id} · "
          "PATCH /enrollments/{id}/status · GET /check · GET /voice-gated · "
@@ -263,8 +263,8 @@ def build():
     add(table([
         ["Rule", "Contract"],
         ["Source of truth", "homes[] from POST /auth/login or GET /me — never hardcode home_id"],
-        ["Default", "default_home_id = the user's FIRST-registered home; stable — adding "
-                    "homes never changes it"],
+        ["Default", "default_home_id = the user's stored preference (PATCH /me, below) if set, "
+                    "else their FIRST-registered home; stable — adding homes never changes it"],
         ["Selected home", "keep a persisted selectedHomeId, initialized to default_home_id; "
                           "\u201cswitching\u201d = change it and refetch — no re-login, no new token"],
         ["On every launch", "refresh /me; if stored selectedHomeId is no longer in homes[] "
@@ -283,6 +283,15 @@ def build():
              f"{mono('GET /favorites?home_id=…')}, {mono('GET /dashboards/config?…')} and "
              f"any cached {mono('/devices/discover')} data for the new home. A voice-gated "
              "favorite in home B needs its own enrollment under home B."))
+
+    one(h2("PATCH /me — change the default home (follows the account)"))
+    add(code('curl -s -X PATCH "$BASE/me" -H "Authorization: Bearer $TOKEN" \\\n'
+             '  -H "Content-Type: application/json" -d \'{"default_home_id":"ne_qli_1"}\''))
+    one(para("\u201cMake this my default\u201d in the home picker. 200 → the GET /me payload with "
+             "the new default_home_id; apply it rather than assuming success. null reverts to "
+             "the first-registered home. Must be one of the user's ACTIVE homes → 400 VALIDATION "
+             "otherwise · 401 no token. If the user later loses that home the server falls back "
+             "silently. selectedHomeId stays per-device; this is the cross-device starting home."))
 
     one(h2("POST /auth/change-password"))
     add(code('curl -s -X POST "$BASE/auth/change-password" -H "Authorization: Bearer $TOKEN" \\\n'

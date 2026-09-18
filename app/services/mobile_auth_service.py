@@ -343,7 +343,7 @@ class MobileAuthService:
         app can attach user identity to feedback reports.
         """
         homes: List[Home] = self._homes.list_by_user(user.user_id, active_only=True)
-        # Oldest-first so default_home_id is STABLE: the user's first
+        # Oldest-first so the fallback default is STABLE: the user's first
         # (primary) home stays the default when later homes are added.
         # (list_by_user orders newest-first, which would silently flip the
         # default to whichever home was onboarded last.)
@@ -359,5 +359,40 @@ class MobileAuthService:
                 for h in homes
             ],
             # Convenience for the common one-home case: use directly as home_id.
-            "default_home_id": homes[0].home_id if homes else None,
+            "default_home_id": self._resolve_default_home(user, homes),
         }
+
+    @staticmethod
+    def _resolve_default_home(user: User, homes: List[Home]) -> Optional[str]:
+        """The user's stored preference if it is still one of their active
+        homes; otherwise the oldest home (or None with no homes).
+
+        A stale preference (membership removed, home deactivated, typo) is
+        simply ignored — login never fails because of it and no cleanup job
+        is needed. `homes` is already filtered to active member homes.
+        """
+        if user.default_home_id and any(h.home_id == user.default_home_id for h in homes):
+            return user.default_home_id
+        return homes[0].home_id if homes else None
+
+    def set_default_home(self, user_id: str, home_id: Optional[str]) -> Optional[User]:
+        """Store the user's preferred home. None clears the preference.
+
+        Returns the updated user, or None when the user is missing/inactive.
+
+        Raises:
+            ValueError: the user is not a member of `home_id`, or it is inactive.
+        """
+        user = self._users.get_by_id(user_id)
+        if user is None or not user.is_active:
+            return None
+        if home_id is not None:
+            home_id = home_id.strip()
+            home = self._homes.get_by_home_id(home_id) if home_id else None
+            if home is None or not home.is_active \
+                    or not self._homes.exists_for_user(user_id, home_id):
+                raise ValueError("default_home_id must be one of your active homes")
+        user.default_home_id = home_id or None
+        updated = self._users.update(user)
+        logger.info(f"default home set user={user_id} home={home_id}")
+        return updated

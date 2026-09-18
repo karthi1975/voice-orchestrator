@@ -37,6 +37,9 @@ class UserModel(Base):
     # Nullable: existing users keep working, they just can't log in until a
     # password is provisioned (admin endpoint or scripts/provision_mobile_login.py).
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Preferred home (no FK on purpose: a stale value is ignored by the
+    # bootstrap's fallback rule rather than blocking home deletion).
+    default_home_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     def __repr__(self) -> str:
         """String representation."""

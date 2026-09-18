@@ -1236,6 +1236,9 @@
                             <button class="btn btn-icon btn-small" onclick="setUserPassword('${user.user_id}', '${user.username}')" title="Set mobile-login password">
                                 <span class="material-icons">key</span>
                             </button>
+                            <button class="btn btn-icon btn-small" onclick="setDefaultHome('${user.user_id}', '${user.username}', '${user.default_home_id || ''}')" title="Default home: the one the app opens first${user.default_home_id ? ' (currently ' + user.default_home_id + ')' : ' (currently: oldest home)'}">
+                                <span class="material-icons">push_pin</span>
+                            </button>
                             <button class="btn btn-icon btn-small" ${user.is_active ? 'style="color: var(--error);"' : ''} onclick="toggleUserActive('${user.user_id}', '${user.username}', ${user.is_active})" title="${user.is_active ? 'Deactivate user' : 'Reactivate user'}">
                                 <span class="material-icons">${user.is_active ? 'person_off' : 'person'}</span>
                             </button>
@@ -1287,6 +1290,46 @@
                 showAlert('Failed to create user', 'error');
             }
         });
+
+        async function setDefaultHome(userId, username, current) {
+            try {
+                const resp = await fetch(`${API_BASE}/users/${userId}/homes`);
+                const data = await resp.json();
+                const homes = (data.homes || []).filter(h => h.is_active);
+                if (!homes.length) {
+                    showAlert(`${username} is not a member of any active home yet`, 'error');
+                    return;
+                }
+                const list = homes.map(h => `  ${h.home_id}  (${h.name})`).join('\n');
+                const answer = prompt(
+                    `Default home for "${username}" \u2014 the home the app opens first.\n` +
+                    `Currently: ${current || 'no preference (oldest home)'}\n\n` +
+                    `Their homes:\n${list}\n\n` +
+                    'Type a home_id to set it, or "clear" to go back to no preference.',
+                    current || homes[0].home_id);
+                if (answer === null) return;
+                const value = answer.trim();
+                if (!value) return;
+                const body = value.toLowerCase() === 'clear' ? { default_home_id: null } : { default_home_id: value };
+                const rv = await fetch(`${API_BASE}/users/${userId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const out = await rv.json();
+                if (rv.ok) {
+                    showAlert(out.default_home_id
+                        ? `Default home for ${username} is now ${out.default_home_id}`
+                        : `Default home preference cleared for ${username}`, 'success');
+                    loadUsers();
+                } else {
+                    showAlert(out.error || 'Failed to set default home', 'error');
+                }
+            } catch (error) {
+                console.error('Error setting default home:', error);
+                showAlert('Failed to set default home', 'error');
+            }
+        }
 
         function viewUserHomes(userId) {
             switchTab('homes');

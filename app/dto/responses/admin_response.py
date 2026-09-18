@@ -30,6 +30,7 @@ class UserResponse(BaseDTO):
     email: Optional[str]
     is_active: bool
     created_at: str
+    default_home_id: Optional[str] = None
 
     @classmethod
     def from_model(cls, user: User) -> 'UserResponse':
@@ -48,7 +49,8 @@ class UserResponse(BaseDTO):
             full_name=user.full_name,
             email=user.email,
             is_active=user.is_active,
-            created_at=user.created_at.isoformat()
+            created_at=user.created_at.isoformat(),
+            default_home_id=user.default_home_id
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -59,7 +61,8 @@ class UserResponse(BaseDTO):
             'full_name': self.full_name,
             'email': self.email,
             'is_active': self.is_active,
-            'created_at': self.created_at
+            'created_at': self.created_at,
+            'default_home_id': self.default_home_id
         }
 
     @classmethod

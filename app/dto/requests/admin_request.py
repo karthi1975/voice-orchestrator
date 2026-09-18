@@ -72,14 +72,21 @@ class UpdateUserRequest(BaseDTO):
     username: Optional[str] = None
     full_name: Optional[str] = None
     email: Optional[str] = None
+    # default_home_id: absent = leave alone; null = clear; string = set
+    default_home_id: Optional[str] = None
+    clear_default_home: bool = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'UpdateUserRequest':
         """Create from dictionary."""
+        has_default = isinstance(data, dict) and 'default_home_id' in data
+        raw = data.get('default_home_id') if has_default else None
         return cls(
             username=get_field(data, 'username'),
             full_name=get_field(data, 'full_name'),
-            email=get_field(data, 'email')
+            email=get_field(data, 'email'),
+            default_home_id=raw.strip() if isinstance(raw, str) and raw.strip() else None,
+            clear_default_home=has_default and (raw is None or (isinstance(raw, str) and not raw.strip())),
         )
 
     def to_dict(self) -> Dict[str, Any]:

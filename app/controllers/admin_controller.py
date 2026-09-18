@@ -401,10 +401,15 @@ class AdminController(BaseController):
 
         Request body:
             {
-                "username": "new_username",  # optional
-                "full_name": "New Name",      # optional
-                "email": "new@example.com"    # optional
+                "username": "new_username",      # optional
+                "full_name": "New Name",          # optional
+                "email": "new@example.com",       # optional
+                "default_home_id": "ne_qli_1"     # optional; null clears it
             }
+
+        default_home_id must be an active home the user is a member of
+        (see /admin/homes/{home_id}/members). It is what login returns as
+        default_home_id; null falls back to the user's oldest home.
 
         Returns:
             200: User updated
@@ -417,11 +422,20 @@ class AdminController(BaseController):
             data = self.get_request_json()
             req = UpdateUserRequest.from_dict(data)
 
+            if req.default_home_id is not None:
+                home = self._home_service.get_home(req.default_home_id)  # ValueError -> 404 below
+                if not home.is_active or not self._home_service.validate_home_access(
+                        user_id, req.default_home_id):
+                    return self.error_response(
+                        f"default_home_id must be an active home '{user_id}' is a member of", 400)
+
             user = self._user_service.update_user(
                 user_id=user_id,
                 username=req.username,
                 full_name=req.full_name,
-                email=req.email
+                email=req.email,
+                default_home_id=req.default_home_id,
+                clear_default_home=req.clear_default_home
             )
 
             response = UserResponse.from_model(user)

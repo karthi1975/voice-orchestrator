@@ -229,7 +229,7 @@ Login / `GET /me` now return all homes:
 | Rule | Contract |
 |---|---|
 | Source of truth | `homes[]` from login / `/me` — never hardcode `home_id` |
-| Default | `default_home_id` = the user's **first-registered** home; stable — adding homes never changes it |
+| Default | `default_home_id` = the user's **stored preference** if they set one (see *Changing the default* below), otherwise their **first-registered** home; stable — adding homes never changes it |
 | Selected home | persist a `selectedHomeId`, initialized to `default_home_id`; switching = change it + refetch (no re-login, token unchanged) |
 | On launch | refresh `/me`; stored `selectedHomeId` missing from `homes[]` → fall back to `default_home_id`; `homes` empty → "awaiting home setup" screen |
 | Picker UI | only when `homes.length > 1` (single-home users see no change); list by `name`, checkmark the selected |
@@ -240,6 +240,29 @@ Login / `GET /me` now return all homes:
 On switch: cancel in-flight requests, refetch `GET /favorites?home_id=…`,
 `GET /dashboards/config?…`, and any cached `/devices/discover` data. A
 voice-gated favorite in home B needs its own enrollment under home B.
+
+### Changing the default (follows the account, not the device)
+
+`selectedHomeId` is per device. When the user wants a home to be their
+starting home everywhere — new phone, reinstall — offer **"Make this my
+default"** in the home picker and call:
+
+```bash
+curl -s -X PATCH "$BASE/me" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"default_home_id": "ne_qli_1"}'
+```
+
+`200` → the same payload as `GET /me` with the new `default_home_id`. Apply
+the response rather than assuming success. Send `{"default_home_id": null}`
+to go back to "no preference" (first-registered home).
+
+Rules: the home must be one of the user's **active** homes → otherwise
+`400 VALIDATION`. If the user later loses access to that home, the server
+silently falls back to the first-registered home; the preference returns if
+they are re-added. `401` without a login token. Admins can also set it from
+the dashboard (pin icon on the user row) or `PUT /admin/users/{id}`.
 
 ---
 
@@ -941,6 +964,7 @@ Run through these to verify the integration end-to-end:
 - [ ] `POST /auth/signup` with a bad invite code → `400 INVALID_INVITE` and no account created (same email signs up fine afterwards)
 - [ ] `POST /auth/redeem-invite` with bearer + valid code → `200`, `homes[]` grew; `GET /me` agrees
 - [ ] Two accounts sharing one home both list it at login
+- [ ] `PATCH /me {"default_home_id": <other home>}` → `200`; next login returns that home as `default_home_id`; `null` reverts to the first-registered home
 - [ ] `GET /enrollments?user_ref=demo_user` with no `Authorization` → `401`
 - [ ] Same call with valid bearer → `200 { count: 0, items: [] }`
 - [ ] `POST /enrollments` → `201` with `automation_id` echoed back
