@@ -21,3 +21,8 @@ mypy==1.7.1
 
 # Production dependencies
 -r requirements.txt
+
+# Doc generators (scripts/gen_api_reference.py, scripts/gen_mobile_handoff_pdf.py)
+reportlab==5.0.1
+markdown==3.9
+xhtml2pdf==0.2.17
