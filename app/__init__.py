@@ -124,7 +124,7 @@ class DependencyContainer:
         if settings.USE_DATABASE and settings.DATABASE_URL:
             # Use SQLAlchemy repositories with PostgreSQL
             from sqlalchemy import create_engine
-            from sqlalchemy.orm import sessionmaker
+            from sqlalchemy.orm import scoped_session, sessionmaker
             from app.repositories.implementations.sqlalchemy_challenge_repo import SQLAlchemyChallengeRepository
             from app.repositories.implementations.sqlalchemy_user_repo import SQLAlchemyUserRepository
             from app.repositories.implementations.sqlalchemy_home_repo import SQLAlchemyHomeRepository
@@ -142,9 +142,12 @@ class DependencyContainer:
             # Create tables if they don't exist
             Base.metadata.create_all(engine)
 
-            # Create session factory
-            SessionLocal = sessionmaker(bind=engine)
-            self._db_session = SessionLocal()
+            # Thread-local sessions: the registry acts like a Session for the
+            # repositories, and release_db_session() (called from the Flask
+            # teardown hook) closes the current thread's session so no read
+            # transaction — and no table lock — outlives a request.
+            # See app/infrastructure/db_session.py for the background.
+            self._db_session = scoped_session(sessionmaker(bind=engine))
 
             # Create repositories with session
             self.challenge_repository = SQLAlchemyChallengeRepository(self._db_session)
@@ -183,6 +186,16 @@ class DependencyContainer:
             self.home_invite_repository = InMemoryHomeInviteRepository()
 
             logger.info("Repositories initialized (in-memory)")
+
+    @property
+    def db_session_registry(self):
+        """The scoped_session registry (None in in-memory mode)."""
+        return self._db_session
+
+    def release_db_session(self) -> None:
+        """Close the current thread's DB session (rolls back an open read txn)."""
+        if self._db_session is not None:
+            self._db_session.remove()
 
     def _init_services(self) -> None:
         """Initialize service layer."""
@@ -359,12 +372,9 @@ def create_app(config: Optional[dict] = None) -> Flask:
     # Store container on app for access in routes
     app.container = container
 
-    # Register cleanup handler for database session
-    @app.teardown_appcontext
-    def cleanup_db_session(exception=None):
-        """Close database session on app teardown."""
-        if hasattr(container, '_db_session') and container._db_session:
-            container._db_session.close()
+    # Release the request's DB session so no transaction/lock outlives it
+    from app.infrastructure.db_session import attach_db_session_cleanup
+    attach_db_session_cleanup(app, container.db_session_registry)
 
     # Register middleware (Phase 5)
     RequestLoggerMiddleware(app, log_request_body=False, log_response_body=False)

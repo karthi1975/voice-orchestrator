@@ -80,6 +80,12 @@ app.container = container
 
 _va_logger = logging.getLogger("voice_auth.wiring")
 
+# scoped_session registries created by the builders below; each one's
+# thread-local session is removed at the end of every request (see
+# app/infrastructure/db_session.py — this is what stops "idle in transaction"
+# sessions from holding table locks and blocking migrations).
+_db_session_registries = []
+
 
 def _build_voice_auth_service() -> VoiceAuthService:
     db_url = os.environ.get("DATABASE_URL")
@@ -96,8 +102,8 @@ def _build_voice_auth_service() -> VoiceAuthService:
 
             engine = create_engine(db_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
             Base.metadata.create_all(engine)  # no-op if Alembic already ran
-            session_factory = scoped_session(sessionmaker(bind=engine, expire_on_commit=False))
-            session = session_factory()
+            session = scoped_session(sessionmaker(bind=engine, expire_on_commit=False))
+            _db_session_registries.append(session)
             _va_logger.info("VoiceAuthService: using SQLAlchemy repositories")
             return VoiceAuthService(
                 enrollment_repo=SQLAlchemyEnrollmentRepository(session),
@@ -134,8 +140,8 @@ def _build_favorite_service(home_validator, device_registry, voice_auth_service)
 
             engine = create_engine(db_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
             Base.metadata.create_all(engine)  # no-op if Alembic already ran
-            session_factory = scoped_session(sessionmaker(bind=engine, expire_on_commit=False))
-            session = session_factory()
+            session = scoped_session(sessionmaker(bind=engine, expire_on_commit=False))
+            _db_session_registries.append(session)
             _va_logger.info("FavoriteDeviceService: using SQLAlchemy repository")
             return FavoriteDeviceService(
                 favorite_repository=SQLAlchemyFavoriteDeviceRepository(session),
@@ -230,6 +236,12 @@ attach_mobile_api_key_auth(
     is_home_owner=container.home_repository.exists_for_user,
 )
 app.register_blueprint(voice_auth_controller.blueprint)
+
+# Close every thread-local DB session at the end of each request so no read
+# transaction (and no table lock) survives — required for ALTER TABLE
+# migrations to run while the app is up.
+from app.infrastructure.db_session import attach_db_session_cleanup
+attach_db_session_cleanup(app, container.db_session_registry, *_db_session_registries)
 
 # Expose on the app object so routes/vapi.py can pick it up via current_app
 app.voice_auth_service = voice_auth_service
