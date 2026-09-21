@@ -616,7 +616,7 @@ in your debug logs when a tap "succeeds" but the device does not move.
 `changed_entities` is what HA reported as changed by the call. When it is
 empty the response is still `200 success: true` but `code` is
 `NO_STATE_CHANGE` (HA accepted the call, nothing moved); the failure
-codes below (`404` / `502`) are described under **Fire an automation**.
+codes below (`404` / `503`) are described under **Fire an automation**.
 
 **Voice-gate guard — `409 ENROLLMENT_REQUIRED`:**
 ```json
@@ -854,7 +854,7 @@ Response `404 ENTITY_NOT_FOUND` — no such entity in this home's HA:
   "entity_id": "switch.bat_sgin", "action": "toggle", "status_code": 404 }
 ```
 
-Response `502 ENTITY_UNAVAILABLE` — the entity exists but HA reports it
+Response `503 ENTITY_UNAVAILABLE` — the entity exists but HA reports it
 `unavailable` (device offline / integration down). HA would otherwise answer
 `200` and silently do nothing:
 ```json
@@ -863,8 +863,10 @@ Response `502 ENTITY_UNAVAILABLE` — the entity exists but HA reports it
   "entity_id": "media_player.lg_webos_tv_ut7000pua", "action": "toggle" }
 ```
 
-Other `502` codes: `HA_UNREACHABLE`, `HA_TIMEOUT`, `HA_ERROR` (HA returned a
-non-2xx; `message` carries HA's text).
+Other `503` codes: `HA_UNREACHABLE`, `HA_TIMEOUT`, `HA_ERROR` (HA returned a
+non-2xx; `message` carries HA's text). Dispatch failures are `503`, not
+`502`: the Cloudflare edge in front of prod replaces an origin `502` body
+with its own error page, so a `502` would reach the app with no JSON.
 
 Response `409` (voice-auth enrollment exists for this automation):
 ```json
@@ -994,7 +996,9 @@ The SDK uses the **VAPI public key**, not the mobile API key.
 | `400` | `NO_CONTROLLABLE_ENTITY` | Device has only sensors/diagnostics; cannot be favorited | exclude from picker |
 | `409` | `CONFLICT` | State conflict (e.g. un-revoke) | surface message |
 | `502` | `VAPI_ERROR` | VAPI provisioning failed | retry once with backoff |
-| `502` | — | Home Assistant unreachable | retry once with backoff |
+| `503` | `HA_UNREACHABLE`, `HA_TIMEOUT`, `HA_ERROR` | Home Assistant unreachable / errored on `/automations/trigger`, `/favorites/{id}/fire` | retry once with backoff |
+| `503` | `ENTITY_UNAVAILABLE` | target entity exists but is `unavailable` in HA (device offline) | show "device offline", no retry |
+| `404` | `ENTITY_NOT_FOUND` | `ha_service.ha_entity` is not an entity in this home | app sent the wrong entity — log the request body |
 | `503` | `NOT_CONFIGURED` | Server feature not wired up | report to backend team |
 
 Error envelope is always:

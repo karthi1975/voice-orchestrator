@@ -182,13 +182,16 @@ def _dispatch_payload(result) -> dict:
 
 def _dispatch_status(result) -> int:
     """HTTP status for a DispatchResult: 200 on success, 404 when the entity
-    is not in HA at all, 502 for everything upstream (unreachable, HA error,
-    entity unavailable)."""
+    is not in HA at all, 503 for everything upstream (unreachable, HA error,
+    entity unavailable). 503 rather than 502 because Cloudflare fronts prod
+    and replaces an origin 502 body with its own error page, so the client
+    would never see `code`/`message`; 503 passes through unchanged (same as
+    HOME_UNREACHABLE on the list endpoints)."""
     if result.success:
         return 200
     if getattr(result, "code", None) == "ENTITY_NOT_FOUND":
         return 404
-    return 502
+    return 503
 
 
 def phone_to_dict(p: PhoneMapping) -> dict:
