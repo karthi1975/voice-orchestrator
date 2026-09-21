@@ -34,7 +34,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -48,6 +48,17 @@ class DispatchResult:
     message: str
     status_code: Optional[int] = None
     latency_ms: Optional[int] = None
+    # Machine-readable qualifier. Failure codes: ENTITY_NOT_FOUND,
+    # ENTITY_UNAVAILABLE, HA_ERROR, HA_TIMEOUT, HA_UNREACHABLE, UNKNOWN_HOME.
+    # Success with a caveat: NO_STATE_CHANGE (HA accepted the call but
+    # reported no entity changed — the thing you meant to toggle did not
+    # move). None on a plain success.
+    code: Optional[str] = None
+    entity_id: Optional[str] = None
+    action: Optional[str] = None
+    # entity_ids HA reported as changed by this service call (None when the
+    # response was not a state list, e.g. on failure).
+    changed_entities: Optional[List[str]] = None
 
 
 @dataclass
@@ -195,23 +206,72 @@ class HADirectDispatcher:
         if not home:
             msg = f"Unknown home_id: {home_id}"
             logger.warning(f"DISPATCH reject {msg}")
-            return DispatchResult(False, msg)
+            return DispatchResult(False, msg, code="UNKNOWN_HOME")
         target = SceneTarget(service=service, entity=entity)
-        resolved_action = action or self.DEFAULT_ACTIONS.get(service, "turn_on")
+        # HA service names are lowercase; "Toggle" from a client would be a
+        # 400 from HA, so normalize here rather than fail on casing.
+        resolved_action = (action or self.DEFAULT_ACTIONS.get(service, "turn_on")).strip().lower()
+        # HA answers 200 to a service call whose entity_id does not exist or
+        # is unavailable — it just changes nothing. That reads as "success"
+        # to the caller, so look the entity up first and refuse loudly.
+        rejected = self._check_entity(home, target, resolved_action)
+        if rejected is not None:
+            return rejected
         return self._do_post(home, target, source_label=f"{service}.{entity}", action=resolved_action)
+
+    def _check_entity(
+        self, home: "HomeConfig", target: "SceneTarget", action: str
+    ) -> Optional[DispatchResult]:
+        """Return a failure DispatchResult if the entity is missing or
+        unavailable in HA; None if it looks fine (or the check itself could
+        not run — the service call then reports its own error)."""
+        url = f"{home.ha_url.rstrip('/')}/api/states/{target.entity_id}"
+        headers = {"Authorization": f"Bearer {home.ha_token}"}
+        try:
+            resp = requests.get(url, headers=headers, timeout=self._timeout)
+        except requests.exceptions.RequestException as e:
+            logger.warning(
+                f"DISPATCH precheck skipped home={home.home_id} entity={target.entity_id}: {e}"
+            )
+            return None
+        if resp.status_code == 404:
+            msg = f"Entity '{target.entity_id}' does not exist in Home Assistant"
+            logger.warning(f"DISPATCH reject home={home.home_id} {msg}")
+            return DispatchResult(
+                False, msg, status_code=404, code="ENTITY_NOT_FOUND",
+                entity_id=target.entity_id, action=action,
+            )
+        if resp.status_code != 200:
+            # Auth/proxy trouble: let the POST surface the real error.
+            return None
+        try:
+            state = (resp.json() or {}).get("state")
+        except ValueError:
+            return None
+        if state == "unavailable":
+            msg = (
+                f"Entity '{target.entity_id}' is unavailable in Home Assistant "
+                f"(device offline or integration not loaded)"
+            )
+            logger.warning(f"DISPATCH reject home={home.home_id} {msg}")
+            return DispatchResult(
+                False, msg, status_code=None, code="ENTITY_UNAVAILABLE",
+                entity_id=target.entity_id, action=action,
+            )
+        return None
 
     def dispatch(self, home_id: str, scene_name: str) -> DispatchResult:
         home = self._resolve_home(home_id)
         if not home:
             msg = f"Unknown home_id: {home_id}"
             logger.warning(f"DISPATCH reject {msg}")
-            return DispatchResult(False, msg)
+            return DispatchResult(False, msg, code="UNKNOWN_HOME")
 
         target = self.resolve_scene(home_id, scene_name)
         if not target:
             msg = f"Unknown scene '{scene_name}' for home {home_id}"
             logger.warning(f"DISPATCH reject {msg}")
-            return DispatchResult(False, msg)
+            return DispatchResult(False, msg, code="UNKNOWN_SCENE")
 
         return self._do_post(home, target, source_label=scene_name, action="turn_on")
 
@@ -229,27 +289,45 @@ class HADirectDispatcher:
         }
         payload = {"entity_id": target.entity_id}
 
+        entity_id = target.entity_id
         t0 = time.monotonic()
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=self._timeout)
         except requests.exceptions.Timeout:
             logger.error(f"DISPATCH timeout home={home.home_id} target={source_label} url={url}")
-            return DispatchResult(False, "Home Assistant timed out.")
+            return DispatchResult(False, "Home Assistant timed out.", code="HA_TIMEOUT",
+                                  entity_id=entity_id, action=action)
         except requests.exceptions.ConnectionError:
             logger.error(f"DISPATCH unreachable home={home.home_id} target={source_label} url={url}")
-            return DispatchResult(False, "Home Assistant unreachable.")
+            return DispatchResult(False, "Home Assistant unreachable.", code="HA_UNREACHABLE",
+                                  entity_id=entity_id, action=action)
         except Exception as e:
             logger.error(f"DISPATCH error home={home.home_id} target={source_label}: {e}", exc_info=True)
-            return DispatchResult(False, f"Dispatch error: {e}")
+            return DispatchResult(False, f"Dispatch error: {e}", code="HA_ERROR",
+                                  entity_id=entity_id, action=action)
 
         latency_ms = int((time.monotonic() - t0) * 1000)
+        changed = _changed_entities(resp)
         logger.info(
-            f"DISPATCH home={home.home_id} target=\"{source_label}\" entity={target.entity_id} "
-            f"status={resp.status_code} took={latency_ms}ms"
+            f"DISPATCH home={home.home_id} target=\"{source_label}\" entity={entity_id} "
+            f"action={action} status={resp.status_code} "
+            f"changed={changed if changed is not None else '?'} took={latency_ms}ms"
         )
 
         if 200 <= resp.status_code < 300:
-            return DispatchResult(True, "ok", resp.status_code, latency_ms)
+            if changed is not None and not changed:
+                # HA took the call but nothing moved. Still a 2xx from HA, so
+                # not a hard failure (some integrations report state on the
+                # next poll), but the caller must be able to see it.
+                return DispatchResult(
+                    True,
+                    f"Home Assistant accepted {target.service}.{action} but reported no "
+                    f"state change for {entity_id}",
+                    resp.status_code, latency_ms, code="NO_STATE_CHANGE",
+                    entity_id=entity_id, action=action, changed_entities=[],
+                )
+            return DispatchResult(True, "ok", resp.status_code, latency_ms,
+                                  entity_id=entity_id, action=action, changed_entities=changed)
 
         body_snippet = (resp.text or "")[:200].replace("\n", " ")
         return DispatchResult(
@@ -257,7 +335,22 @@ class HADirectDispatcher:
             f"HA returned {resp.status_code}: {body_snippet}",
             resp.status_code,
             latency_ms,
+            code="HA_ERROR",
+            entity_id=entity_id,
+            action=action,
         )
+
+
+def _changed_entities(resp) -> Optional[List[str]]:
+    """HA's service-call response is the list of states changed during the
+    call. Return their entity_ids, or None if the body is not such a list."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return None
+    if not isinstance(body, list):
+        return None
+    return [s.get("entity_id") for s in body if isinstance(s, dict) and s.get("entity_id")]
 
 
 def _normalize(s: str) -> str:

@@ -601,11 +601,22 @@ The server resolves the HA action automatically per domain:
 - HA automations → `trigger`
 - locks → `unlock`
 
+Send `{ "action": "toggle" }` (or `turn_off`, `lock`, …) to override; the
+value is lower-cased before it reaches HA.
+
 Response `200` on success:
 ```json
-{ "success": true, "message": "ok", "status_code": 200, "latency_ms": 142,
-  "favorite_id": "...", "entity_id": "switch.bat_sign" }
+{ "success": true, "message": "ok", "code": null, "status_code": 200, "latency_ms": 142,
+  "favorite_id": "...", "entity_id": "switch.bat_sign", "action": "toggle",
+  "changed_entities": ["switch.bat_sign"] }
 ```
+
+`entity_id` and `action` echo exactly what the server fired — check them
+in your debug logs when a tap "succeeds" but the device does not move.
+`changed_entities` is what HA reported as changed by the call. When it is
+empty the response is still `200 success: true` but `code` is
+`NO_STATE_CHANGE` (HA accepted the call, nothing moved); the failure
+codes below (`404` / `502`) are described under **Fire an automation**.
 
 **Voice-gate guard — `409 ENROLLMENT_REQUIRED`:**
 ```json
@@ -813,10 +824,47 @@ curl -s -X POST "$BASE/automations/trigger" \
 omit them and the gate is bypassed (only do that for clearly non-protected
 items).
 
+Optional body field `action` overrides the per-domain default (`trigger`
+for automations, `unlock` for locks, `turn_on` for everything else):
+`turn_on`, `turn_off`, `toggle`, `lock`, `unlock`. It is lower-cased
+server-side. `ha_entity` is the entity suffix (`bat_sign`), **never** the
+HA `device_id` — take it from `primary_entity_id` of the device row.
+
 Response `200`:
 ```json
-{ "success": true, "message": "OK", "status_code": 200, "latency_ms": 142 }
+{ "success": true, "message": "ok", "code": null, "status_code": 200, "latency_ms": 142,
+  "entity_id": "switch.bat_sign", "action": "toggle",
+  "changed_entities": ["switch.bat_sign"] }
 ```
+
+- `entity_id` / `action` — exactly what was fired. If you tapped "Bat Sign"
+  and this says `media_player.…`, the app sent the wrong entity.
+- `changed_entities` — the entity ids HA reported as changed. Empty list ⇒
+  `code: "NO_STATE_CHANGE"` (still `200`, `success: true`): HA accepted the
+  call but nothing moved. Treat it as "not confirmed" in the UI rather than
+  flipping the tile.
+
+Before calling HA the server looks the entity up, so a bad target no longer
+comes back as success:
+
+Response `404 ENTITY_NOT_FOUND` — no such entity in this home's HA:
+```json
+{ "success": false, "code": "ENTITY_NOT_FOUND",
+  "message": "Entity 'switch.bat_sgin' does not exist in Home Assistant",
+  "entity_id": "switch.bat_sgin", "action": "toggle", "status_code": 404 }
+```
+
+Response `502 ENTITY_UNAVAILABLE` — the entity exists but HA reports it
+`unavailable` (device offline / integration down). HA would otherwise answer
+`200` and silently do nothing:
+```json
+{ "success": false, "code": "ENTITY_UNAVAILABLE",
+  "message": "Entity 'media_player.lg_webos_tv_ut7000pua' is unavailable in Home Assistant (device offline or integration not loaded)",
+  "entity_id": "media_player.lg_webos_tv_ut7000pua", "action": "toggle" }
+```
+
+Other `502` codes: `HA_UNREACHABLE`, `HA_TIMEOUT`, `HA_ERROR` (HA returned a
+non-2xx; `message` carries HA's text).
 
 Response `409` (voice-auth enrollment exists for this automation):
 ```json
@@ -830,7 +878,8 @@ Response `409` (voice-auth enrollment exists for this automation):
 When you see `409 ENROLLMENT_REQUIRED`, start the VAPI SDK with the
 appropriate `variableValues` (see §3.6) instead of retrying this endpoint.
 
-Response `502` if Home Assistant is unreachable; `400` for validation errors.
+`400` for validation errors (missing fields, `ha_entity` containing a dot,
+`ha_service: "homeassistant"`).
 
 ---
 

@@ -163,6 +163,34 @@ def scene_mapping_to_dict(m: SceneWebhookMapping) -> dict:
     }
 
 
+def _dispatch_payload(result) -> dict:
+    """Shape a DispatchResult for the mobile API. `entity_id` and `action`
+    echo exactly what was fired so a client that sent the wrong entity can
+    see it; `changed_entities` is what HA reported as changed (empty list =
+    HA accepted the call but nothing moved, see code NO_STATE_CHANGE)."""
+    return {
+        "success": result.success,
+        "message": result.message,
+        "code": getattr(result, "code", None),
+        "status_code": result.status_code,
+        "latency_ms": result.latency_ms,
+        "entity_id": getattr(result, "entity_id", None),
+        "action": getattr(result, "action", None),
+        "changed_entities": getattr(result, "changed_entities", None),
+    }
+
+
+def _dispatch_status(result) -> int:
+    """HTTP status for a DispatchResult: 200 on success, 404 when the entity
+    is not in HA at all, 502 for everything upstream (unreachable, HA error,
+    entity unavailable)."""
+    if result.success:
+        return 200
+    if getattr(result, "code", None) == "ENTITY_NOT_FOUND":
+        return 404
+    return 502
+
+
 def phone_to_dict(p: PhoneMapping) -> dict:
     return {
         "id": p.id,
@@ -640,13 +668,7 @@ class VoiceAuthController(BaseController):
                 }), 409
 
         result = self._dispatcher.dispatch_direct(home_id, ha_service, ha_entity, action=action)
-        status = 200 if result.success else 502
-        return jsonify({
-            "success": result.success,
-            "message": result.message,
-            "status_code": result.status_code,
-            "latency_ms": result.latency_ms,
-        }), status
+        return jsonify(_dispatch_payload(result)), _dispatch_status(result)
 
     # ------- scene-mapping CRUD (mobile-facing) ------------------------------
 
@@ -1514,13 +1536,8 @@ class VoiceAuthController(BaseController):
             return jsonify({"error": "favorite has malformed entity_id"}), 500
         ha_service, ha_entity = f.entity_id.split(".", 1)
         result = self._dispatcher.dispatch_direct(f.home_id, ha_service, ha_entity, action=action)
-        status = 200 if result.success else 502
-        return jsonify({
-            "success": result.success,
-            "message": result.message,
-            "status_code": result.status_code,
-            "latency_ms": result.latency_ms,
-            "favorite_id": f.id,
-            "entity_id": f.entity_id,
-        }), status
+        payload = _dispatch_payload(result)
+        payload["favorite_id"] = f.id
+        payload.setdefault("entity_id", f.entity_id)
+        return jsonify(payload), _dispatch_status(result)
 
