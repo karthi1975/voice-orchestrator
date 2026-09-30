@@ -128,3 +128,16 @@ def test_catalog_dispatch_unchanged_apart_from_codes(dispatcher):
         r = dispatcher.dispatch("scott_home", "Night Scene")
     g.assert_not_called()
     assert r.success and r.changed_entities == ["light.hall"] and r.action == "turn_on"
+
+
+def test_home_config_prefers_db_token_over_env(dispatcher):
+    """A token renewed in the portal must be what HA reads use, not the
+    stale HOME_CONFIGS_JSON entry (that left /automations on a 401 while
+    dispatch worked)."""
+    dispatcher.set_credentials_resolver(lambda hid: ("https://ha.example/", "fresh") if hid == "scott_home" else None)
+    cfg = dispatcher.home_config("scott_home")
+    assert cfg is not None and cfg.ha_token == "fresh"
+    # env fallback still works for homes the DB does not know
+    dispatcher._homes["legacy"] = HomeConfig("legacy", "https://old.example/", "envtok")
+    assert dispatcher.home_config("legacy").ha_token == "envtok"
+    assert dispatcher.home_config("nope") is None

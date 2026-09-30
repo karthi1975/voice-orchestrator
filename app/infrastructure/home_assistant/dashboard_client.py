@@ -281,7 +281,7 @@ class HADashboardClient:
         cheaper than one connection per command. Errors are raised in command
         order, so the first failure wins regardless of reply order.
         """
-        cfg = self._dispatcher._homes.get(home_id)
+        cfg = self._dispatcher.home_config(home_id)
         if not cfg:
             raise HomeUnreachableError(f"no HA config for home '{home_id}'")
 

@@ -580,7 +580,7 @@ class VoiceAuthController(BaseController):
         home_id = request.args.get("home_id", "").strip()
         if not home_id:
             return jsonify({"error": "home_id query param is required", "code": "VALIDATION"}), 400
-        cfg = self._dispatcher._homes.get(home_id)
+        cfg = self._dispatcher.home_config(home_id)
         if not cfg:
             return jsonify({"error": f"home {home_id} not configured", "code": "NOT_CONFIGURED"}), 404
 

@@ -155,6 +155,15 @@ class HADirectDispatcher:
                     return cfg
         return self._homes.get(home_id)
 
+    def home_config(self, home_id: str) -> Optional[HomeConfig]:
+        """(ha_url, ha_token) for a home: portal/DB token first, env fallback.
+
+        Every HA read path (device registry, dashboards, discovery) must go
+        through this rather than the env-only map, otherwise a token renewed
+        in the portal fixes dispatch but leaves those reads on the old token.
+        """
+        return self._resolve_home(home_id)
+
     def has_home(self, home_id: str) -> bool:
         """Return True if the orchestrator can dispatch to this home — i.e.
         it has credentials from either the portal-managed DB token or the

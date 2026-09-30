@@ -183,7 +183,7 @@ class HADeviceRegistry:
 
     def _fetch_states(self, home_id: str) -> List[dict]:
         """GET /api/states, with HA's failure modes mapped to HomeUnreachableError."""
-        cfg = self._dispatcher._homes.get(home_id)
+        cfg = self._dispatcher.home_config(home_id)
         if not cfg:
             logger.warning(f"HADeviceRegistry: no HA config for home_id={home_id}")
             return []
@@ -211,7 +211,7 @@ class HADeviceRegistry:
         return r.json()
 
     def _fetch_devices(self, home_id: str, force_refresh: bool = False) -> List[HADevice]:
-        cfg = self._dispatcher._homes.get(home_id)
+        cfg = self._dispatcher.home_config(home_id)
         if not cfg:
             logger.warning(f"HADeviceRegistry: no HA config for home_id={home_id}")
             return []
