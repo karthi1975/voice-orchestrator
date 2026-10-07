@@ -278,6 +278,7 @@ def _build_http(dispatcher, entity_metadata=None):
     dash = MagicMock(spec=HADashboardClient)
     registry = MagicMock()
     registry.list_devices.return_value = []
+    registry.entity_areas.return_value = {}
     controller = VoiceAuthController(
         service=svc,
         dispatcher=dispatcher,
@@ -392,6 +393,13 @@ class TestDashboardEndpoints:
             _device(None, ["scene.orphan"]),                  # no area -> dropped
             _device("Living Room", ["light.sofa"]),           # duplicate entity deduped
         ]
+        registry.entity_areas.return_value = {
+            "light.bat_lamp": "Bat Cave",
+            "light.sofa": "Living Room",
+            "sensor.temp": "Living Room",
+            "switch.bat_sign": "Office at QLI",
+            # scene.orphan: resolves to no area -> absent from the map
+        }
         r = client.get(f"{BASE}/dashboards/config?{Q}")
         assert r.status_code == 200
         body = r.get_json()
@@ -400,6 +408,62 @@ class TestDashboardEndpoints:
         assert body["views"][0]["entities"] == ["switch.bat_sign"]
         assert body["views"][1]["entities"] == ["light.sofa", "sensor.temp"]
         assert body["entities"] == ["switch.bat_sign", "light.sofa", "sensor.temp"]
+
+    def test_strategy_dashboard_includes_deviceless_helper(self, http):
+        # Scott's Entry Door pattern: the relay device sits in a hidden
+        # area, the input_boolean helper carries an entity-level area and
+        # must surface there as the door's visible control.
+        client, dash, registry = http
+        dash.get_config.return_value = {
+            "strategy": {"type": "original-states",
+                         "areas": {"hidden": ["hidden_devices"]}}
+        }
+        registry.list_devices.return_value = [
+            _device("Hidden Devices", ["switch.shelly_relay"]),
+        ]
+        registry.entity_areas.return_value = {
+            "switch.shelly_relay": "Hidden Devices",
+            "input_boolean.entry_door": "Entry Area",   # no device
+        }
+        r = client.get(f"{BASE}/dashboards/config?{Q}")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert [v["title"] for v in body["views"]] == ["Entry Area"]
+        assert body["views"][0]["entities"] == ["input_boolean.entry_door"]
+        assert body["entities"] == ["input_boolean.entry_door"]
+
+    def test_strategy_dashboard_helper_in_hidden_area_stays_hidden(self, http):
+        client, dash, registry = http
+        dash.get_config.return_value = {
+            "strategy": {"type": "original-states",
+                         "areas": {"hidden": ["utility"]}}
+        }
+        registry.entity_areas.return_value = {
+            "input_boolean.pump_override": "Utility",
+        }
+        r = client.get(f"{BASE}/dashboards/config?{Q}")
+        assert r.status_code == 200
+        assert r.get_json()["views"] == []
+
+    def test_strategy_dashboard_entity_area_override_moves_entity(self, http):
+        # An entity reassigned to its own area leaves its device's view —
+        # matching how HA's area dashboard places it.
+        client, dash, registry = http
+        dash.get_config.return_value = {"strategy": {"type": "original-states"}}
+        registry.list_devices.return_value = [
+            _device("Garage", ["switch.opener", "sensor.opener_temp"]),
+        ]
+        registry.entity_areas.return_value = {
+            "switch.opener": "Driveway",     # entity-level override
+            "sensor.opener_temp": "Garage",  # follows the device
+        }
+        r = client.get(f"{BASE}/dashboards/config?{Q}")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert {v["title"]: v["entities"] for v in body["views"]} == {
+            "Driveway": ["switch.opener"],
+            "Garage": ["sensor.opener_temp"],
+        }
 
     def test_strategy_dashboard_unreachable_registry_503(self, http):
         client, dash, registry = http
@@ -580,6 +644,7 @@ def http_gated(dispatcher):
     dash = MagicMock(spec=HADashboardClient)
     registry = MagicMock()
     registry.list_devices.return_value = []
+    registry.entity_areas.return_value = {}
     controller = VoiceAuthController(
         service=svc, dispatcher=dispatcher, dashboard_client=dash,
         device_registry=registry, entity_metadata=meta,

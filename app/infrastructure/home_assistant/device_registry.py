@@ -3,7 +3,14 @@
 Wraps HA's REST API to enumerate physical devices (as opposed to entities).
 HA's REST API doesn't expose the device registry directly, so we synthesize
 it via the template API: render a JSON dict mapping every entity_id -> its
-device_id, then group entities by device.
+[device_id, area], then group entities by device.
+
+The per-entity area comes from HA's area_name(entity_id), which resolves the
+entity-level area assignment and falls back to the device's area — the same
+rule HA's own area dashboard uses. That is what lets a device-less helper
+(e.g. an input_boolean assigned to "Entry Area" that fronts a hidden relay)
+carry an area at all; `entity_areas()` exposes the map so boards can place
+helpers where HA would.
 
 Caching is critical — the template-render call is O(N entities) and takes
 ~1-2s for a home with 400 entities. We cache per home_id with a 60s TTL.
@@ -97,7 +104,10 @@ class HADeviceRegistry:
         # shorter TTL than the device grouping derived from them.
         self._states_ttl = states_cache_ttl_seconds
         self._timeout = request_timeout_seconds
-        self._cache: Dict[str, Tuple[float, List[HADevice]]] = {}
+        # (fetched_at, devices, entity_areas) — devices and the entity->area
+        # map come from the same template render, so they are cached (and
+        # served stale through outages) as one unit.
+        self._cache: Dict[str, Tuple[float, List[HADevice], Dict[str, str]]] = {}
         self._states_cache: Dict[str, Tuple[float, List[dict]]] = {}
         self._lock = threading.Lock()
 
@@ -105,15 +115,34 @@ class HADeviceRegistry:
 
     def list_devices(self, home_id: str, force_refresh: bool = False) -> List[HADevice]:
         """Return all devices for a home. Cached for `cache_ttl_seconds`."""
+        devices, _ = self._registry_snapshot(home_id, force_refresh=force_refresh)
+        return devices
+
+    def entity_areas(self, home_id: str, force_refresh: bool = False) -> Dict[str, str]:
+        """Return {entity_id: area_name} for every board-eligible entity.
+
+        Covers every device-attached entity plus device-less ("orphan")
+        entities — helpers — whose domain is in PRIMARY_DOMAINS. Area is the
+        entity-level assignment with device fallback (HA's area_name rule),
+        so a helper placed in an area appears here even though it has no
+        device. Entities that resolve to no area are absent. Shares the
+        devices cache: same TTL, same stale-through-outage behavior.
+        """
+        _, areas = self._registry_snapshot(home_id, force_refresh=force_refresh)
+        return areas
+
+    def _registry_snapshot(
+        self, home_id: str, force_refresh: bool = False
+    ) -> Tuple[List[HADevice], Dict[str, str]]:
         with self._lock:
             cached = self._cache.get(home_id)
             now = time.monotonic()
             if not force_refresh and cached and (now - cached[0]) < self._ttl:
-                return cached[1]
+                return cached[1], cached[2]
 
         # Fetch outside the lock to avoid blocking concurrent reads
         try:
-            devices = self._fetch_devices(home_id, force_refresh=force_refresh)
+            devices, areas = self._fetch_devices(home_id, force_refresh=force_refresh)
         except HomeUnreachableError:
             # Serve a stale cache through brief HA outages; with nothing
             # cached, surface the outage instead of pretending "no devices".
@@ -122,11 +151,11 @@ class HADeviceRegistry:
                     f"HADeviceRegistry: HA unreachable for home={home_id}; "
                     f"serving stale cache ({len(cached[1])} devices)"
                 )
-                return cached[1]
+                return cached[1], cached[2]
             raise
         with self._lock:
-            self._cache[home_id] = (time.monotonic(), devices)
-        return devices
+            self._cache[home_id] = (time.monotonic(), devices, areas)
+        return devices, areas
 
     def get_device(self, home_id: str, device_id: str) -> Optional[HADevice]:
         for d in self.list_devices(home_id):
@@ -210,11 +239,13 @@ class HADeviceRegistry:
             )
         return r.json()
 
-    def _fetch_devices(self, home_id: str, force_refresh: bool = False) -> List[HADevice]:
+    def _fetch_devices(
+        self, home_id: str, force_refresh: bool = False
+    ) -> Tuple[List[HADevice], Dict[str, str]]:
         cfg = self._dispatcher.home_config(home_id)
         if not cfg:
             logger.warning(f"HADeviceRegistry: no HA config for home_id={home_id}")
-            return []
+            return [], {}
 
         ha_url = cfg.ha_url.rstrip("/")
         headers = {"Authorization": f"Bearer {cfg.ha_token}"}
@@ -225,10 +256,18 @@ class HADeviceRegistry:
         states = self.get_states(home_id, force_refresh=force_refresh)
         entity_ids = [s["entity_id"] for s in states]
 
-        # 2. Map entity_id -> device_id via template API. One call, all entities.
+        # 2. Map entity_id -> [device_id, area] via template API. One call,
+        # all entities. area_name() on an entity id resolves the entity-level
+        # area with device fallback, so helpers carry their area here too.
         if not entity_ids:
-            return []
-        parts = ['"' + e + '": (device_id("' + e + '") or "")' for e in entity_ids]
+            return [], {}
+        parts = [
+            '"' + e + '": ['
+            '(device_id("' + e + '") or ""),'
+            '(area_name("' + e + '") or "")'
+            ']'
+            for e in entity_ids
+        ]
         tmpl = "{{ {" + ", ".join(parts) + "} | tojson }}"
         try:
             r2 = requests.post(
@@ -247,16 +286,27 @@ class HADeviceRegistry:
             raise HomeUnreachableError(
                 f"Home Assistant for home '{home_id}' returned HTTP {r2.status_code}"
             )
-        ent_to_dev = json.loads(r2.text)
+        ent_to_info = json.loads(r2.text)
 
-        # 3. Group entities by device_id; skip orphan entities (no device).
+        # 3. Group entities by device_id, and record each entity's resolved
+        # area. Orphan entities (no device) qualify for the area map only
+        # when their domain is controllable (PRIMARY_DOMAINS) — that admits
+        # helpers like input_boolean while keeping device-less sensors,
+        # automations and zones off the boards.
         groups: Dict[str, List[str]] = defaultdict(list)
-        for ent, dev in ent_to_dev.items():
+        entity_areas: Dict[str, str] = {}
+        for ent, info in ent_to_info.items():
+            dev = info[0] if info else ""
+            area = info[1] if len(info) > 1 else ""
             if dev:
                 groups[dev].append(ent)
+                if area:
+                    entity_areas[ent] = area
+            elif area and "." in ent and ent.split(".", 1)[0] in PRIMARY_DOMAINS:
+                entity_areas[ent] = area
 
         if not groups:
-            return []
+            return [], entity_areas
 
         # 4. Pull device attributes (name / manufacturer / model / area) for each device.
         dev_ids = list(groups.keys())
@@ -311,11 +361,14 @@ class HADeviceRegistry:
 
         # Stable sort by name for predictable client-side rendering
         devices.sort(key=lambda d: (d.name or "").lower())
+        attached = {e for d in devices for e in d.all_entities}
+        orphans_with_area = sum(1 for e in entity_areas if e not in attached)
         logger.info(
             f"HADeviceRegistry: refreshed home={home_id} devices={len(devices)} "
-            f"controllable={sum(1 for d in devices if d.is_controllable)}"
+            f"controllable={sum(1 for d in devices if d.is_controllable)} "
+            f"area_entities={len(entity_areas)} orphan_helpers={orphans_with_area}"
         )
-        return devices
+        return devices, entity_areas
 
     @staticmethod
     def _pick_primary_entity(entities: List[str]) -> Tuple[Optional[str], Optional[str]]:

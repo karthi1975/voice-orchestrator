@@ -88,7 +88,7 @@ class TestRegistry:
         reg = HADeviceRegistry(dispatcher, cache_ttl_seconds=0)  # ttl 0 = always refetch
 
         states = _resp(200, [{"entity_id": "switch.a"}])
-        ent_map = _resp(200, {"switch.a": "dev1"})
+        ent_map = _resp(200, {"switch.a": ["dev1", "Cave"]})
         attrs = _resp(200, {"dev1": ["Device A", "Acme", "M1", "Cave"]})
         with patch("app.infrastructure.home_assistant.device_registry.requests.get",
                    return_value=states), \
@@ -209,7 +209,7 @@ class TestHttp:
 
     def test_genuinely_missing_device_still_400(self, client):
         states = _resp(200, [{"entity_id": "switch.a"}])
-        ent_map = _resp(200, {"switch.a": "dev1"})
+        ent_map = _resp(200, {"switch.a": ["dev1", ""]})
         attrs = _resp(200, {"dev1": ["Device A", "", "", ""]})
         with patch("app.infrastructure.home_assistant.device_registry.requests.get",
                    return_value=states), \

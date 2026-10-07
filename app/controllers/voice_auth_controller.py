@@ -1463,21 +1463,38 @@ class VoiceAuthController(BaseController):
     def _expand_strategy_views(self, home_id: str, strategy: dict) -> tuple:
         """Expand a strategy dashboard into (views, entities): one view per
         area, honoring the strategy's hidden/order area lists (which use
-        area slugs, while the registry carries display names). Entities
-        without a device area are omitted — same net effect as the
-        original-states strategy's hide_entities_without_area. Returns
-        empty views when no registry is wired."""
+        area slugs, while the registry carries display names). Each entity
+        lands in its *resolved* area — entity-level assignment first, device
+        area as fallback (HA's own rule) — so a device-less helper placed in
+        an area shows there, and an entity reassigned away from its device
+        moves with it. Entities resolving to no area are omitted — same net
+        effect as the original-states strategy's
+        hide_entities_without_area. Returns empty views when no registry is
+        wired."""
         if self._registry is None:
             return [], []
         areas_opt = strategy.get("areas") or {}
         hidden = set(areas_opt.get("hidden") or [])
         order = list(areas_opt.get("order") or [])
 
+        # Same cached registry snapshot behind both calls — one HA fetch.
+        devices = self._registry.list_devices(home_id)
+        entity_areas = self._registry.entity_areas(home_id)
+
         by_area: dict = {}
-        for d in self._registry.list_devices(home_id):
-            if not d.area:
-                continue
-            by_area.setdefault(d.area, []).extend(d.all_entities)
+        attached: set = set()
+        for d in devices:
+            for e in d.all_entities:
+                attached.add(e)
+                area = entity_areas.get(e)
+                if area:
+                    by_area.setdefault(area, []).append(e)
+        # Device-less helpers (entity-level area, controllable domains): the
+        # "hidden relay, visible virtual control" pattern — e.g. an
+        # input_boolean fronting a dry-contact automation.
+        for e, area in entity_areas.items():
+            if e not in attached:
+                by_area.setdefault(area, []).append(e)
 
         def _sort_key(area_name: str):
             slug = self._area_slug(area_name)
