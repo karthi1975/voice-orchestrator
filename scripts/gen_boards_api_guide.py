@@ -27,8 +27,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-VERSION = "1.3"
-DATE = "July 30, 2026"
+VERSION = "1.4"
+DATE = "October 7, 2026"
 OUT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "docs", "boards_api_guide.pdf",
@@ -164,7 +164,18 @@ def build():
              "board detail screen, and tapping a tile to control a device.", "subtitle"))
     one(para(f"Version {VERSION} &nbsp;|&nbsp; {DATE} &nbsp;|&nbsp; Tetradapt", "meta"))
     add(note(
-        "<b>What changed in 1.3.</b> New §8 is a run book: every call you need, with real output captured from production, including how to prove the 409 path without touching the house. <b>1.2:</b> "
+        "<b>What changed in 1.4.</b> Strategy boards now place every entity by its "
+        "<i>entity-level</i> area (device area as fallback), and <b>device-less helper "
+        "entities</b> — <font face='Courier' size='8'>input_boolean</font>, "
+        "<font face='Courier' size='8'>input_button</font>, template switches/covers and "
+        "friends — appear as tiles in their areas. Expect new tiles, entirely new views, "
+        "and the occasional tile that moved to a different view; no request or response "
+        "field changed shape. Two client notes: render button-domain tiles as stateless "
+        "(their <font face='Courier' size='8'>state</font> is a last-pressed timestamp, "
+        "not on/off), and never send an explicit <font face='Courier' size='8'>action"
+        "</font> on tap — the server now defaults buttons to "
+        "<font face='Courier' size='8'>press</font>. Details in §4 “Helper tiles” and §5. "
+        "<b>1.3:</b> §8 run book with real production output, including the 409 path. <b>1.2:</b> "
         "<font face='Courier' size='8'>/dashboards/config</font> now returns "
         "<font face='Courier' size='8'>entity_meta</font> — a per-entity record with the "
         "real Home Assistant icon, display name, category, live state and whether the tile is "
@@ -371,6 +382,44 @@ def build():
              "<font face='Courier' size='8'>gate_check_available: false</font> case and for "
              "someone enrolling a device between your fetch and the tap."))
 
+    one(h2("Helper tiles — device-less entities (new in 1.4)"))
+    one(para("Homes often hide raw hardware and expose a clean virtual control instead: a "
+             "Shelly relay wired to a door's dry contacts lives in a hidden “Hidden "
+             "Devices” area, while an <font face='Courier' size='8'>input_button</font> "
+             "helper named “Entry Door” carries the area the person actually sees. Boards "
+             "now include such helpers: on a strategy board every entity is placed by its "
+             "entity-level HA area (falling back to its device's area), and a device-less "
+             "entity with an area becomes a normal tile. Only controllable helper domains "
+             "qualify (light, lock, cover, climate, fan, media_player, switch, "
+             "input_boolean, input_button) — device-less sensors, automations and zones "
+             "still never appear."))
+    one(para("Nothing about the payload shape changed. What you will observe after this "
+             "release: new tiles inside existing views, views for areas that previously "
+             "had no visible device at all, and occasionally a tile that moved to another "
+             "view because its entity was reassigned in HA. Render them all exactly like "
+             "any other tile from <font face='Courier' size='8'>entity_meta</font>."))
+    one(para("A real helper record, captured from production (NE QLI Office, Entry view):"))
+    add(code("""
+"input_button.entry_open_door": {
+  "name": "Entry Door",    "domain": "input_button",
+  "icon": "mdi:door",      "icon_source": "state",
+  "device_class": null,    "unit_of_measurement": null,
+  "entity_category": null, "hidden": false,
+  "state": "2026-09-24T21:35:15.144531+00:00",
+  "controllable": true,
+  "voice_gated": false,    "voice_auth_enrollment_id": null
+}
+"""))
+    add(note(
+        "<b>Button tiles are stateless — do not print their state.</b> For the "
+        "<font face='Courier' size='8'>button</font> and "
+        "<font face='Courier' size='8'>input_button</font> domains, "
+        "<font face='Courier' size='8'>state</font> is the timestamp of the last press, "
+        "not on/off. Showing it raw puts an ISO date string under the tile name. Render "
+        "these tiles with no state line (or a static “Tap to run”), and do not try to "
+        "show an on/off visual — there is nothing to reflect. Every other domain is "
+        "unchanged."))
+
     one(h2("The entity_meta record"))
     add(table([
         ["Field", "Meaning"],
@@ -438,7 +487,7 @@ def build():
     add(table([
         ["Domain", "Tile", "Tap"],
         ["light, switch, fan, cover, lock, climate, media_player, scene, script, automation, "
-         "vacuum, button, input_boolean", "Normal (bright)", "Fires the device (§5)."],
+         "vacuum, button, input_boolean, input_button", "Normal (bright)", "Fires the device (§5)."],
         ["sensor, binary_sensor, number, select, camera, device_tracker, update, event, sun, "
          "zone, person, weather", "Dimmed, read-only", "Not tappable."],
     ], widths=[4.0, 1.5, 1.4], code_cols=(0,)))
@@ -482,6 +531,22 @@ Content-Type: application/json
     one(h2("Response — 200"))
     add(code('{ "success": true, "message": "toggled light.desk_lamp",\n'
              '  "status_code": 200, "latency_ms": 184 }'))
+
+    add(note(
+        "<b>Do not send an explicit <font face='Courier' size='8'>action</font> on a tile "
+        "tap (new in 1.4).</b> Omitting it lets the server pick the per-domain default: "
+        "<font face='Courier' size='8'>automation → trigger</font>, "
+        "<font face='Courier' size='8'>lock → unlock</font>, "
+        "<font face='Courier' size='8'>button / input_button → press</font>, everything "
+        "else <font face='Courier' size='8'>turn_on</font>. A hardcoded "
+        "<font face='Courier' size='8'>turn_on</font> or "
+        "<font face='Courier' size='8'>toggle</font> would be rejected for the new "
+        "button-helper tiles — those domains support only "
+        "<font face='Courier' size='8'>press</font>. So the Entry Door helper fires as "
+        "<font face='Courier' size='8'>ha_service: \"input_button\", ha_entity: "
+        "\"entry_open_door\"</font> with no action field. Reserve "
+        "<font face='Courier' size='8'>action</font> for deliberate overrides such as "
+        "<font face='Courier' size='8'>turn_off</font> on a light."))
 
     one(h2("Response — 409, the voice gate"))
     one(para("409 is not a failure. It means this entity is voice-gated for this user: the "
