@@ -187,10 +187,14 @@ class HADirectDispatcher:
     #   - `automation` must be `trigger` (turn_on only ENABLES the automation)
     #   - `lock` defaults to `unlock` (the canonical "let me in" use case);
     #     the favorites-lock flow always voice-gates this
+    #   - `button`/`input_button` only support `press` (turn_on is a 400
+    #     from HA); input_button helpers are how dry-contact doors surface
     #   - everything else uses `turn_on` (scenes, scripts, lights, switches, ...)
     DEFAULT_ACTIONS: Dict[str, str] = {
         "automation": "trigger",
         "lock": "unlock",
+        "button": "press",
+        "input_button": "press",
     }
 
     def dispatch_direct(

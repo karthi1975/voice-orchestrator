@@ -71,6 +71,14 @@ PRIMARY_DOMAIN_PRIORITY: List[str] = [
 ]
 PRIMARY_DOMAINS = set(PRIMARY_DOMAIN_PRIORITY)
 
+# Device-less entities qualify for the area map in these domains. Wider than
+# PRIMARY_DOMAINS by input_button: an orphan input_button is a user-created
+# helper ("press to open the door"), while device-attached button entities
+# are mostly diagnostics (restart/identify) — which is also why input_button
+# must NOT join PRIMARY_DOMAIN_PRIORITY: that would flip restart-button-only
+# devices to controllable.
+HELPER_ORPHAN_DOMAINS = PRIMARY_DOMAINS | {"input_button"}
+
 
 @dataclass
 class HADevice:
@@ -122,7 +130,7 @@ class HADeviceRegistry:
         """Return {entity_id: area_name} for every board-eligible entity.
 
         Covers every device-attached entity plus device-less ("orphan")
-        entities — helpers — whose domain is in PRIMARY_DOMAINS. Area is the
+        entities — helpers — whose domain is in HELPER_ORPHAN_DOMAINS. Area is the
         entity-level assignment with device fallback (HA's area_name rule),
         so a helper placed in an area appears here even though it has no
         device. Entities that resolve to no area are absent. Shares the
@@ -290,9 +298,9 @@ class HADeviceRegistry:
 
         # 3. Group entities by device_id, and record each entity's resolved
         # area. Orphan entities (no device) qualify for the area map only
-        # when their domain is controllable (PRIMARY_DOMAINS) — that admits
-        # helpers like input_boolean while keeping device-less sensors,
-        # automations and zones off the boards.
+        # when their domain is controllable (HELPER_ORPHAN_DOMAINS) — that
+        # admits helpers like input_boolean/input_button while keeping
+        # device-less sensors, automations and zones off the boards.
         groups: Dict[str, List[str]] = defaultdict(list)
         entity_areas: Dict[str, str] = {}
         for ent, info in ent_to_info.items():
@@ -302,7 +310,7 @@ class HADeviceRegistry:
                 groups[dev].append(ent)
                 if area:
                     entity_areas[ent] = area
-            elif area and "." in ent and ent.split(".", 1)[0] in PRIMARY_DOMAINS:
+            elif area and "." in ent and ent.split(".", 1)[0] in HELPER_ORPHAN_DOMAINS:
                 entity_areas[ent] = area
 
         if not groups:

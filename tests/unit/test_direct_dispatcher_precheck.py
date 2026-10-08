@@ -97,6 +97,19 @@ def test_default_actions_still_apply(dispatcher):
     assert p.call_args[0][0].endswith("/api/services/automation/trigger")
 
 
+@pytest.mark.parametrize("domain", ["input_button", "button"])
+def test_buttons_default_to_press(dispatcher, domain):
+    # input_button only supports press; turn_on is a 400 from HA. This is
+    # the tap path for helper tiles like input_button.entry_open_door.
+    entity = f"{domain}.entry_open_door"
+    state = {"entity_id": entity, "state": "2026-10-07T00:00:00+00:00"}
+    with patch(f"{MOD}.requests.get", return_value=_resp(200, state)), \
+         patch(f"{MOD}.requests.post", return_value=_resp(200, [{"entity_id": entity}])) as p:
+        r = dispatcher.dispatch_direct("scott_home", domain, "entry_open_door")
+    assert r.success and r.action == "press"
+    assert p.call_args[0][0].endswith(f"/api/services/{domain}/press")
+
+
 def test_precheck_network_error_falls_through_to_service_call(dispatcher):
     with patch(f"{MOD}.requests.get", side_effect=requests.exceptions.ConnectionError("down")), \
          patch(f"{MOD}.requests.post", side_effect=requests.exceptions.ConnectionError("down")):

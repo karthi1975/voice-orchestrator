@@ -41,7 +41,9 @@ STATES = _resp(200, [
     {"entity_id": "sensor.relay_power"},    # device-attached, no area override
     {"entity_id": "input_boolean.entry_door"},  # orphan helper with area
     {"entity_id": "cover.entry_door_virtual"},  # orphan helper with area
+    {"entity_id": "input_button.press_to_open"},  # orphan press helper with area
     {"entity_id": "sensor.random_stat"},    # orphan NON-controllable with area
+    {"entity_id": "automation.open_door"},  # orphan automation with area
     {"entity_id": "input_boolean.scratch"},  # orphan helper, NO area
 ])
 ENT_MAP = _resp(200, {
@@ -49,7 +51,9 @@ ENT_MAP = _resp(200, {
     "sensor.relay_power": ["dev1", "Hidden Devices"],
     "input_boolean.entry_door": ["", "Entry Area"],
     "cover.entry_door_virtual": ["", "Entry Area"],
+    "input_button.press_to_open": ["", "Entry Area"],
     "sensor.random_stat": ["", "Entry Area"],
+    "automation.open_door": ["", "Entry Area"],
     "input_boolean.scratch": ["", ""],
 })
 ATTRS = _resp(200, {"dev1": ["Shelly Relay", "Shelly", "1PM", "Hidden Devices"]})
@@ -73,9 +77,22 @@ class TestEntityAreas:
         assert areas["switch.relay"] == "Hidden Devices"
         assert areas["sensor.relay_power"] == "Hidden Devices"
 
+    def test_orphan_input_button_included(self):
+        # The real Scott case: input_button.entry_open_door — a press
+        # helper, not in PRIMARY_DOMAINS but a deliberate user-created
+        # control (HELPER_ORPHAN_DOMAINS admits it).
+        areas = self._fetch(_registry())
+        assert areas["input_button.press_to_open"] == "Entry Area"
+
     def test_non_controllable_orphan_excluded(self):
         areas = self._fetch(_registry())
         assert "sensor.random_stat" not in areas
+
+    def test_orphan_automation_excluded(self):
+        # Automations stay off the boards even with an area assigned —
+        # agreed policy; the helper is the user-facing control.
+        areas = self._fetch(_registry())
+        assert "automation.open_door" not in areas
 
     def test_orphan_without_area_excluded(self):
         areas = self._fetch(_registry())
