@@ -102,6 +102,7 @@ from app.infrastructure.home_assistant.dashboard_client import (
     extract_entity_ids,
 )
 from app.infrastructure.home_assistant.device_registry import (
+    HELPER_ORPHAN_DOMAINS,
     HADeviceRegistry,
     HomeUnreachableError,
 )
@@ -1178,12 +1179,21 @@ class VoiceAuthController(BaseController):
                     ])).lower(),
                 })
 
-        # Activations (scene/script/automation) and orphan controllable entities
+        # Activations (scene/script/automation) and orphan controllable entities.
+        # Orphans qualify by the same rule the boards use (HELPER_ORPHAN_DOMAINS),
+        # so a helper tile on a board is also findable here.
         ACTIVATION = {"scene", "script", "automation"}
-        ALLOWED_ENTITY_DOMS = {"input_boolean"}  # raw entities — narrow allowlist
         # Entities that belong to a device are surfaced via the device row above,
         # so skip them here to avoid duplicates.
         device_entities = {e for d in devices for e in d.all_entities}
+
+        # Resolved entity-level areas (best-effort): orphan helpers carry their
+        # own area, matching where the boards place them.
+        entity_area_map: dict = {}
+        try:
+            entity_area_map = self._registry.entity_areas(home_id)
+        except Exception as e:
+            logger.warning(f"search_items: entity_areas fetch failed home={home_id}: {e}")
 
         for entity_id, info in states_by_entity.items():
             if "." not in entity_id:
@@ -1193,7 +1203,7 @@ class VoiceAuthController(BaseController):
                 k = dom
             elif entity_id in device_entities:
                 continue
-            elif dom in ALLOWED_ENTITY_DOMS:
+            elif dom in HELPER_ORPHAN_DOMAINS:
                 k = "entity"
             else:
                 continue
@@ -1208,7 +1218,7 @@ class VoiceAuthController(BaseController):
                 "domain": dom,
                 "manufacturer": None,
                 "model": None,
-                "area": None,
+                "area": entity_area_map.get(entity_id),
                 "state": info.get("state"),
                 "icon": (icon_meta.get(entity_id) or {}).get("icon"),
                 "voice_gated": self._gate_lookup(gate_map, entity_id) is not None,

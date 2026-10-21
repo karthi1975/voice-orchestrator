@@ -256,6 +256,7 @@ class TestSearchIcons:
 
         registry = MagicMock()
         registry.list_devices.return_value = [device]
+        registry.entity_areas.return_value = {"switch.deck_light": "Deck"}
         registry.get_states.return_value = [
             {"entity_id": "switch.deck_light", "state": "off",
              "attributes": {"friendly_name": "Deck light"}},
