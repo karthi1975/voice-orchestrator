@@ -127,3 +127,48 @@ class TestSearchOrphanHelpers:
         by_id = {r["entity_id"]: r for r in self._rows(c, "&q=entry")}
         row = by_id.get("input_button.entry_open_door")
         assert row is not None and row["area"] is None
+
+
+class TestDiscoverDevicesHelpers(TestSearchOrphanHelpers):
+    """/devices/discover appends the same orphan helpers the boards admit, as
+    rows with device_id null — a client that builds its UI from the device
+    list sees every board tile."""
+
+    def _items(self, c):
+        r = c.get("/api/v1/voice-auth/devices/discover?home_id=h1")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert body["count"] == len(body["items"])
+        return body["items"]
+
+    def test_helper_row_appended_with_null_device_id(self, client):
+        c, _ = client
+        by_entity = {i["primary_entity_id"]: i for i in self._items(c)}
+        row = by_entity.get("input_button.entry_open_door")
+        assert row is not None
+        assert row["device_id"] is None
+        assert row["is_helper"] is True
+        assert row["name"] == "Entry Door"
+        assert row["area"] == "Entry"
+        assert row["primary_domain"] == "input_button"
+        assert row["is_controllable"] is True
+        assert row["all_entities"] == ["input_button.entry_open_door"]
+
+    def test_physical_devices_marked_not_helper(self, client):
+        c, _ = client
+        by_entity = {i["primary_entity_id"]: i for i in self._items(c)}
+        assert by_entity["switch.deck_light"]["is_helper"] is False
+        assert by_entity["switch.deck_light"]["device_id"] == "dev1"
+
+    def test_device_attached_entities_not_duplicated_as_helpers(self, client):
+        c, _ = client
+        items = self._items(c)
+        # switch.deck_light is in entity_areas AND attached to dev1: one row only.
+        assert sum(1 for i in items
+                   if "switch.deck_light" in i["all_entities"]) == 1
+
+    def test_helper_lookup_failure_leaves_physical_list_intact(self, client):
+        c, registry = client
+        registry.entity_areas.side_effect = RuntimeError("HA down")
+        items = self._items(c)
+        assert [i["device_id"] for i in items] == ["dev1"]

@@ -39,7 +39,8 @@ Endpoints:
   PATCH  /favorites/reorder        bulk-update positions (body: [{id, position}, ...])
   POST   /favorites/{id}/fire      activate a favorite; refuses 409 if voice-gated
 
-  GET    /devices/discover         enumerate physical HA devices for a home
+  GET    /devices/discover         enumerate HA devices for a home, plus device-less
+                                   helper rows (device_id null, is_helper true)
   GET    /items/search             unified search across devices/entities/scenes/scripts/automations;
                                    rows carry icon + voice_gated when user_ref is supplied
 
@@ -1070,23 +1071,54 @@ class VoiceAuthController(BaseController):
             devices = self._registry.list_devices(home_id)
         except HomeUnreachableError as ex:
             return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
+        items = [
+            {
+                "device_id": d.device_id,
+                "name": d.name,
+                "manufacturer": d.manufacturer,
+                "model": d.model,
+                "area": d.area,
+                "primary_entity_id": d.primary_entity_id,
+                "primary_domain": d.primary_domain,
+                "is_controllable": d.is_controllable,
+                "all_entities": d.all_entities,
+                "is_helper": False,
+            }
+            for d in devices
+        ]
+        # Device-less helpers (same qualification as the area boards): rows
+        # with device_id null, so a client that builds its UI from this list
+        # sees every tile the boards can show. Dispatch by primary_entity_id
+        # with no action — the server default (press for buttons) applies.
+        # Best-effort: the physical list must survive a metadata hiccup.
+        try:
+            areas = self._registry.entity_areas(home_id)
+            attached = {e for d in devices for e in d.all_entities}
+            names = {
+                s.get("entity_id", ""): (s.get("attributes") or {}).get("friendly_name")
+                for s in self._registry.get_states(home_id)
+            }
+            for entity_id in sorted(areas):
+                if entity_id in attached:
+                    continue
+                items.append({
+                    "device_id": None,
+                    "name": names.get(entity_id) or entity_id.split(".", 1)[1],
+                    "manufacturer": None,
+                    "model": None,
+                    "area": areas[entity_id],
+                    "primary_entity_id": entity_id,
+                    "primary_domain": entity_id.split(".", 1)[0],
+                    "is_controllable": True,
+                    "all_entities": [entity_id],
+                    "is_helper": True,
+                })
+        except Exception as e:
+            logger.warning(f"discover_devices: helper rows skipped home={home_id}: {e}")
         return jsonify({
             "home_id": home_id,
-            "count": len(devices),
-            "items": [
-                {
-                    "device_id": d.device_id,
-                    "name": d.name,
-                    "manufacturer": d.manufacturer,
-                    "model": d.model,
-                    "area": d.area,
-                    "primary_entity_id": d.primary_entity_id,
-                    "primary_domain": d.primary_domain,
-                    "is_controllable": d.is_controllable,
-                    "all_entities": d.all_entities,
-                }
-                for d in devices
-            ],
+            "count": len(items),
+            "items": items,
         }), 200
 
     # ------- items/search ---------------------------------------------------
