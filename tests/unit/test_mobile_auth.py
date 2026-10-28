@@ -14,7 +14,7 @@ import os
 import time
 
 import pytest
-from flask import Blueprint, Flask, g, jsonify
+from flask import Blueprint, Flask, g, jsonify, request
 
 from app.controllers.mobile_auth_controller import MobileAuthController
 from app.domain.models import Home, User
@@ -322,8 +322,18 @@ def guarded_client(service, repos, monkeypatch):
             "user_ref": getattr(g, "user_ref", None),
         })
 
+    @bp.route("/echo-args", methods=["GET"])
+    def echo_args():
+        return jsonify({
+            "user_ref": request.args.get("user_ref"),
+            "home_id": request.args.get("home_id"),
+            "has_user_ref": "user_ref" in request.args,
+            "has_home_id": "home_id" in request.args,
+        })
+
     attach_mobile_api_key_auth(bp, token_verifier=service.verify_token,
-                               is_home_owner=homes.exists_for_user)
+                               is_home_owner=homes.exists_for_user,
+                               default_home_resolver=service.default_home_for)
     app.register_blueprint(bp)
     return app.test_client()
 
@@ -396,6 +406,49 @@ class TestMiddleware:
         rv = guarded_client.get("/api/v1/voice-auth/whoami?home_id=other_home",
                                 headers={"Authorization": "Bearer sk_ios_testkey"})
         assert rv.status_code == 200
+
+
+class TestBlankArgFill:
+    """Shipped app builds call list endpoints with `?user_ref=&home_id=`
+    (present but blank) after login; the middleware fills them for JWT
+    callers from the token + default home."""
+
+    def test_blank_params_filled_for_jwt(self, guarded_client, service):
+        token = service.issue_token("scott_mobile")["token"]
+        rv = guarded_client.get(
+            "/api/v1/voice-auth/echo-args?user_ref=&home_id=",
+            headers={"Authorization": f"Bearer {token}"})
+        assert rv.status_code == 200
+        body = rv.get_json()
+        assert body["user_ref"] == "scott_mobile"
+        assert body["home_id"] == "scott_home"
+
+    def test_absent_params_left_absent(self, guarded_client, service):
+        # Absent keeps endpoint-specific meaning (e.g. "all homes").
+        token = service.issue_token("scott_mobile")["token"]
+        rv = guarded_client.get(
+            "/api/v1/voice-auth/echo-args",
+            headers={"Authorization": f"Bearer {token}"})
+        body = rv.get_json()
+        assert body["has_user_ref"] is False
+        assert body["has_home_id"] is False
+
+    def test_supplied_values_untouched(self, guarded_client, service):
+        token = service.issue_token("scott_mobile")["token"]
+        rv = guarded_client.get(
+            "/api/v1/voice-auth/echo-args?user_ref=scott_mobile&home_id=scott_home",
+            headers={"Authorization": f"Bearer {token}"})
+        body = rv.get_json()
+        assert body["user_ref"] == "scott_mobile"
+        assert body["home_id"] == "scott_home"
+
+    def test_static_key_blanks_untouched(self, guarded_client):
+        rv = guarded_client.get(
+            "/api/v1/voice-auth/echo-args?user_ref=&home_id=",
+            headers={"Authorization": "Bearer sk_ios_testkey"})
+        body = rv.get_json()
+        assert body["user_ref"] == ""
+        assert body["home_id"] == ""
 
 
 # --- Admin guard ---

@@ -297,6 +297,18 @@ class MobileAuthService:
     def get_user(self, user_id: str) -> Optional[User]:
         return self._users.get_by_id(user_id)
 
+    def default_home_for(self, user_id: str) -> Optional[str]:
+        """The home to assume when a request names none: same resolution as
+        the login bootstrap (stored preference if still an active member home,
+        else the oldest one). Backs the middleware's blank-param fill for JWT
+        callers, so shipped app builds that send `home_id=` keep working."""
+        user = self._users.get_by_id(user_id)
+        if user is None:
+            return None
+        homes = self._homes.list_by_user(user_id, active_only=True)
+        homes.sort(key=lambda h: (h.created_at is None, h.created_at))
+        return self._resolve_default_home(user, homes)
+
     def change_password(self, user_id: str, current_password: str,
                         new_password: str) -> bool:
         """Change a user's password after verifying the current one.

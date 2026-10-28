@@ -38,6 +38,7 @@ import os
 from typing import Callable, Dict, Optional
 
 from flask import Blueprint, Response, g, jsonify, request
+from werkzeug.datastructures import ImmutableMultiDict, MultiDict
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +118,48 @@ def _find_foreign_home(token_user: str,
     return None
 
 
+def _fill_blank_jwt_args(
+    token_user: str,
+    default_home_resolver: Optional[Callable[[str], Optional[str]]],
+) -> None:
+    """Shipped app builds call the list endpoints with blank query params
+    (`?user_ref=&home_id=`) right after login instead of using the identity
+    the login response returned. The token already names the user, and the
+    user has a default home, so fill the blanks rather than answer 400.
+
+    Only params that are PRESENT and blank are touched: an absent param keeps
+    its endpoint-specific meaning (e.g. /voice-gated without home_id means
+    "all homes"), and a supplied value is never overridden — the mismatch and
+    foreign-home checks above already vetted it."""
+
+    def _blank(field: str) -> bool:
+        values = request.args.getlist(field)
+        return bool(values) and not any((v or "").strip() for v in values)
+
+    fills = {}
+    if _blank("user_ref"):
+        fills["user_ref"] = token_user
+    if _blank("home_id") and default_home_resolver is not None:
+        home_id = default_home_resolver(token_user)
+        if home_id:
+            fills["home_id"] = home_id
+    if not fills:
+        return
+    args = MultiDict(request.args)
+    for field, value in fills.items():
+        args.setlist(field, [value])
+    request.args = ImmutableMultiDict(args)
+    logger.info(
+        f"voice_auth filled blank {sorted(fills)} for user={token_user!r} "
+        f"path={request.path}"
+    )
+
+
 def attach_mobile_api_key_auth(
     blueprint: Blueprint,
     token_verifier: Optional[Callable[[str], Optional[str]]] = None,
     is_home_owner: Optional[Callable[[str, str], bool]] = None,
+    default_home_resolver: Optional[Callable[[str], Optional[str]]] = None,
 ) -> None:
     """Wire the Bearer-key check onto the given blueprint's before_request hook.
 
@@ -134,6 +173,11 @@ def attach_mobile_api_key_auth(
         is_home_owner: optional callable(user_id, home_id) -> bool. When
             provided, JWT callers naming a home_id they do not own get 403.
             Static-key callers are never affected.
+        default_home_resolver: optional callable(user_id) -> home_id | None.
+            When provided, a JWT caller sending a present-but-blank home_id
+            query param gets it filled with their default home (blank
+            user_ref is always filled from the token). Static-key callers
+            are never affected.
     """
     keys = _load_keys()
 
@@ -197,6 +241,7 @@ def attach_mobile_api_key_auth(
                             "error": f"home '{foreign}' does not belong to the authenticated user",
                             "code": "FORBIDDEN",
                         }), 403
+                _fill_blank_jwt_args(token_user, default_home_resolver)
                 g.mobile_platform = "jwt"
                 g.user_ref = token_user
                 return None

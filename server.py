@@ -234,6 +234,9 @@ attach_mobile_api_key_auth(
     # JWT callers may only touch homes they are a member of (home_members;
     # owners are members too). Static-key callers are unaffected.
     is_home_owner=container.home_repository.exists_for_user,
+    # Shipped app builds send `?user_ref=&home_id=` (blank) after login; fill
+    # those from the token + the user's default home instead of answering 400.
+    default_home_resolver=mobile_auth_service.default_home_for,
 )
 app.register_blueprint(voice_auth_controller.blueprint)
 
