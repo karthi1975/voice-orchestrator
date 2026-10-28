@@ -286,38 +286,25 @@ class TestSearchIcons:
         app.register_blueprint(controller.blueprint)
         return app.test_client(), meta, svc
 
-    def test_rows_carry_icons(self, client):
+    # Icons and voice_gated were REMOVED from search rows on 2026-10-28: the
+    # mobile handoff doc (§3.2.2) is the wire contract, shipped builds
+    # deserialize with a strict member contract and crash on fields they
+    # don't know, and neither field was ever documented. They may return via
+    # a doc revision; until then search rows carry exactly the doc's keys.
+
+    def test_rows_carry_no_icon_or_gate_keys(self, client):
         c, _, _ = client
         rows = c.get("/api/v1/voice-auth/items/search?home_id=h1&user_ref=u").get_json()["items"]
-        by_id = {r["entity_id"]: r for r in rows}
-        assert by_id["switch.deck_light"]["icon"] == "mdi:toggle-switch"   # device row
-        assert by_id["scene.good_night"]["icon"] == "mdi:palette"          # activation row
+        assert rows
+        for row in rows:
+            assert "icon" not in row
+            assert "voice_gated" not in row
 
-    def test_metadata_failure_leaves_icons_null_but_search_works(self, client):
+    def test_metadata_failure_does_not_break_search(self, client):
+        # Search no longer reads tile metadata, so a metadata outage is
+        # invisible to it — this guards against the dependency creeping back.
         c, meta, _ = client
         meta.get.side_effect = RuntimeError("HA down")
         r = c.get("/api/v1/voice-auth/items/search?home_id=h1&user_ref=u")
         assert r.status_code == 200
-        assert all(row["icon"] is None for row in r.get_json()["items"])
-
-    def test_rows_carry_the_voice_gate(self, client):
-        """Search is a tile surface too — it must not require a probe either."""
-        from app.domain.voice_auth_enums import ChallengeType
-
-        c, _, svc = client
-        svc.create_enrollment(
-            user_ref="u", home_id="h1", automation_id="good_night",
-            automation_name="Good Night", ha_service="scene", ha_entity="good_night",
-            challenge_type=ChallengeType.VERIFICATION,
-        )
-        rows = c.get("/api/v1/voice-auth/items/search?home_id=h1&user_ref=u").get_json()["items"]
-        by_id = {r["entity_id"]: r for r in rows}
-        assert by_id["scene.good_night"]["voice_gated"] is True
-        assert by_id["switch.deck_light"]["voice_gated"] is False
-
-    def test_anonymous_search_reports_nothing_gated(self, client):
-        """Gating is per-user; with no user_ref there is no honest answer, so
-        the rows say false rather than guessing."""
-        c, _, _ = client
-        rows = c.get("/api/v1/voice-auth/items/search?home_id=h1").get_json()["items"]
-        assert all(r["voice_gated"] is False for r in rows)
+        assert r.get_json()["count"] > 0

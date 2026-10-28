@@ -106,9 +106,23 @@ class TestSearchOrphanHelpers:
         assert row["domain"] == "input_button"
         assert row["name"] == "Entry Door"
         assert row["area"] == "Entry"          # same placement as the board
-        assert row["icon"] == "mdi:door"
         # The automation of the same name still shows alongside it.
         assert "automation.open_door" in by_id
+
+    # The mobile handoff doc (§3.2.2) is the wire contract: shipped builds
+    # deserialize rows with a strict member contract and crash on unknown
+    # fields, so every row carries exactly these keys — nothing more.
+    DOC_SEARCH_KEYS = {
+        "kind", "device_id", "entity_id", "name", "domain", "manufacturer",
+        "model", "area", "state", "is_favorited", "favorite_id",
+    }
+
+    def test_rows_carry_exactly_the_documented_keys(self, client):
+        c, _ = client
+        rows = self._rows(c)
+        assert rows
+        for row in rows:
+            assert set(row) == self.DOC_SEARCH_KEYS, row["entity_id"]
 
     def test_orphan_input_boolean_still_searchable(self, client):
         c, _ = client
@@ -162,6 +176,23 @@ class TestDiscoverDevicesHelpers(TestSearchOrphanHelpers):
         by_entity = {i["primary_entity_id"]: i for i in self._items(c)}
         assert "is_helper" not in by_entity["switch.deck_light"]
         assert by_entity["switch.deck_light"]["device_id"] == "dev1"
+
+    # The mobile handoff doc (§3.2.1) is the wire contract for device rows;
+    # helper rows add exactly one marker key on top of it.
+    DOC_DISCOVER_KEYS = {
+        "device_id", "name", "manufacturer", "model", "area",
+        "primary_entity_id", "primary_domain", "is_controllable",
+        "all_entities",
+    }
+
+    def test_discover_rows_carry_exactly_the_documented_keys(self, client):
+        c, _ = client
+        rows = self._items(c)
+        assert rows
+        for row in rows:
+            expected = (self.DOC_DISCOVER_KEYS | {"is_helper"}
+                        if row["device_id"] is None else self.DOC_DISCOVER_KEYS)
+            assert set(row) == expected, row["primary_entity_id"]
 
     def test_device_attached_entities_not_duplicated_as_helpers(self, client):
         c, _ = client

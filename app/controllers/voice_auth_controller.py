@@ -1178,12 +1178,10 @@ class VoiceAuthController(BaseController):
         except Exception as e:
             logger.warning(f"search_items: states fetch failed home={home_id}: {e}")
 
-        # Icons, same resolution chain the boards surface uses. Best-effort:
-        # search must still return rows when the metadata fetch fails.
-        icon_meta = self._tile_metadata(home_id, list(states_by_entity)) or {}
-        # Same gate the fire path applies, so a search result can be rendered
-        # as gated without tapping it to find out.
-        gate_map, _ = self._gate_map(user_ref)
+        # NOTE: search rows carry exactly the fields the mobile handoff doc
+        # (§3.2.2) promises — shipped builds deserialize with a strict member
+        # contract and crash on fields they don't know, so icons and gate
+        # flags stay off this payload until a doc revision adds them.
 
         # 3. Build candidate items
         items: list = []
@@ -1205,8 +1203,6 @@ class VoiceAuthController(BaseController):
                     "model": d.model,
                     "area": d.area,
                     "state": state_info.get("state"),
-                    "icon": (icon_meta.get(primary) or {}).get("icon"),
-                    "voice_gated": self._gate_lookup(gate_map, primary) is not None,
                     "is_favorited": primary in fav_by_entity,
                     "favorite_id": fav_by_entity.get(primary),
                     "_match_blob": " ".join(filter(None, [
@@ -1256,8 +1252,6 @@ class VoiceAuthController(BaseController):
                 "model": None,
                 "area": entity_area_map.get(entity_id),
                 "state": info.get("state"),
-                "icon": (icon_meta.get(entity_id) or {}).get("icon"),
-                "voice_gated": self._gate_lookup(gate_map, entity_id) is not None,
                 "is_favorited": entity_id in fav_by_entity,
                 "favorite_id": fav_by_entity.get(entity_id),
                 "_match_blob": (name + " " + entity_id).lower(),
