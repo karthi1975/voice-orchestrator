@@ -154,10 +154,13 @@ class TestDiscoverDevicesHelpers(TestSearchOrphanHelpers):
         assert row["is_controllable"] is True
         assert row["all_entities"] == ["input_button.entry_open_door"]
 
-    def test_physical_devices_marked_not_helper(self, client):
+    def test_physical_devices_carry_no_helper_key(self, client):
+        # Omitted, not false: shipped app builds deserialize device rows with
+        # a strict member contract and crash on fields they don't know, so
+        # physical rows keep the exact pre-helper payload shape.
         c, _ = client
         by_entity = {i["primary_entity_id"]: i for i in self._items(c)}
-        assert by_entity["switch.deck_light"]["is_helper"] is False
+        assert "is_helper" not in by_entity["switch.deck_light"]
         assert by_entity["switch.deck_light"]["device_id"] == "dev1"
 
     def test_device_attached_entities_not_duplicated_as_helpers(self, client):

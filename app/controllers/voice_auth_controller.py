@@ -1071,6 +1071,11 @@ class VoiceAuthController(BaseController):
             devices = self._registry.list_devices(home_id)
         except HomeUnreachableError as ex:
             return jsonify({"error": str(ex), "code": "HOME_UNREACHABLE"}), 503
+        # Physical device rows carry NO is_helper key — the key appears only
+        # on the appended helper rows (always true there). Shipped app builds
+        # deserialize this list with a strict member contract and crash on an
+        # unknown field, so device rows must keep the exact pre-helper shape;
+        # a client treats a missing is_helper as false.
         items = [
             {
                 "device_id": d.device_id,
@@ -1082,7 +1087,6 @@ class VoiceAuthController(BaseController):
                 "primary_domain": d.primary_domain,
                 "is_controllable": d.is_controllable,
                 "all_entities": d.all_entities,
-                "is_helper": False,
             }
             for d in devices
         ]
