@@ -366,6 +366,9 @@ class MobileAuthService:
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
+            # "female" | "male" | null. Selects gender-specific material in
+            # the health educator portal; the app may set it via PATCH /me.
+            "gender": user.gender,
             "homes": [
                 {"home_id": h.home_id, "name": h.name}
                 for h in homes
@@ -386,6 +389,22 @@ class MobileAuthService:
         if user.default_home_id and any(h.home_id == user.default_home_id for h in homes):
             return user.default_home_id
         return homes[0].home_id if homes else None
+
+    def set_gender(self, user_id: str, gender: Optional[str]) -> Optional[User]:
+        """Store the user's gender ("female" / "male"; None = not specified).
+
+        Returns the updated user, or None when the user is missing/inactive.
+
+        Raises:
+            ValueError: any other value.
+        """
+        user = self._users.get_by_id(user_id)
+        if user is None or not user.is_active:
+            return None
+        user.gender = User.normalize_gender(gender)
+        updated = self._users.update(user)
+        logger.info(f"gender set user={user_id}")
+        return updated
 
     def set_default_home(self, user_id: str, home_id: Optional[str]) -> Optional[User]:
         """Store the user's preferred home. None clears the preference.

@@ -13,6 +13,7 @@ from typing import Tuple, Any, Optional
 import requests as _requests
 from flask import request
 from app.controllers.base_controller import BaseController
+from app.domain.models import User
 from app.services.user_service import UserService
 from app.services.home_service import HomeService
 from app.services.alexa_mapping_service import AlexaMappingService
@@ -323,7 +324,8 @@ class AdminController(BaseController):
             {
                 "username": "john_doe",
                 "full_name": "John Doe",
-                "email": "john@example.com"  # optional
+                "email": "john@example.com",  # optional
+                "gender": "male"              # optional; "female" | "male"
             }
 
         Returns:
@@ -342,7 +344,8 @@ class AdminController(BaseController):
                 full_name=req.full_name,
                 email=req.email,
                 user_id=req.user_id,
-                password=req.password
+                password=req.password,
+                gender=req.gender
             )
 
             response = UserResponse.from_model(user)
@@ -404,7 +407,8 @@ class AdminController(BaseController):
                 "username": "new_username",      # optional
                 "full_name": "New Name",          # optional
                 "email": "new@example.com",       # optional
-                "default_home_id": "ne_qli_1"     # optional; null clears it
+                "default_home_id": "ne_qli_1",    # optional; null clears it
+                "gender": "female"                # optional; "female" | "male"; null clears it
             }
 
         default_home_id must be an active home the user is a member of
@@ -421,6 +425,10 @@ class AdminController(BaseController):
         try:
             data = self.get_request_json()
             req = UpdateUserRequest.from_dict(data)
+            try:
+                User.normalize_gender(req.gender)
+            except ValueError as e:
+                return self.error_response(str(e), 400)
 
             if req.default_home_id is not None:
                 home = self._home_service.get_home(req.default_home_id)  # ValueError -> 404 below
@@ -435,7 +443,9 @@ class AdminController(BaseController):
                 full_name=req.full_name,
                 email=req.email,
                 default_home_id=req.default_home_id,
-                clear_default_home=req.clear_default_home
+                clear_default_home=req.clear_default_home,
+                gender=req.gender,
+                clear_gender=req.clear_gender
             )
 
             response = UserResponse.from_model(user)
@@ -526,6 +536,11 @@ class AdminController(BaseController):
 
         try:
             user = self._user_service.deactivate_user(user_id)
+            if self._on_user_deactivated is not None:
+                try:
+                    self._on_user_deactivated(user)
+                except Exception as e:  # never block the deactivation itself
+                    logger.warning(f"deactivation hook failed for {user_id}: {e}")
             response = UserResponse.from_model(user)
             logger.info(f"User deactivated: {user_id}")
             return self.json_response(response.to_dict(), 200)
@@ -590,6 +605,13 @@ class AdminController(BaseController):
 
     def set_dispatcher(self, dispatcher) -> None:
         self._dispatcher = dispatcher
+
+    # Called with the User after a deactivation (ends sessions the user holds
+    # in connected systems, e.g. the health educator portal).
+    _on_user_deactivated = None
+
+    def set_user_deactivated_hook(self, hook) -> None:
+        self._on_user_deactivated = hook
 
     @staticmethod
     def _env_home_ids() -> set:

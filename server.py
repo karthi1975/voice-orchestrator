@@ -222,7 +222,16 @@ mobile_auth_service = MobileAuthService(
     # approval step; see HomeInviteService.
     invite_service=container.home_invite_service,
 )
-mobile_auth_controller = MobileAuthController(service=mobile_auth_service)
+# Single sign-on into the health educator portal for every active user.
+# Off (503 NOT_CONFIGURED) until HEALTH_EDUCATOR_URL and
+# HEALTH_EDUCATOR_SSO_PRIVATE_KEY are set.
+from app.services.health_educator_service import HealthEducatorService
+
+health_educator_service = HealthEducatorService()
+container.admin_controller.set_user_deactivated_hook(health_educator_service.revoke_sessions)
+
+mobile_auth_controller = MobileAuthController(service=mobile_auth_service,
+                                              health_educator=health_educator_service)
 app.register_blueprint(mobile_auth_controller.blueprint)
 
 # Tier 1 auth: bearer API key check on every /api/v1/voice-auth/* request.

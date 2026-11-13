@@ -12,10 +12,14 @@ This is a separate blueprint from voice_auth_api on purpose:
 """
 
 import logging
-from typing import Any, Tuple
+from typing import Any, Optional, Tuple
 
 from flask import Blueprint, jsonify, request
 
+from app.services.health_educator_service import (HealthEducatorNotConfigured,
+                                                   HealthEducatorRefused,
+                                                   HealthEducatorService,
+                                                   HealthEducatorUnavailable)
 from app.services.home_invite_service import InvalidInviteError
 from app.services.mobile_auth_service import (MobileAuthService,
                                               PendingApprovalError,
@@ -35,8 +39,10 @@ logger = logging.getLogger(__name__)
 class MobileAuthController:
     """Login + bootstrap endpoints backed by MobileAuthService."""
 
-    def __init__(self, service: MobileAuthService, url_prefix: str = "/api/v1/voice-auth"):
+    def __init__(self, service: MobileAuthService, url_prefix: str = "/api/v1/voice-auth",
+                 health_educator: Optional[HealthEducatorService] = None):
         self._svc = service
+        self._health_educator = health_educator
         self.blueprint = Blueprint("mobile_auth", __name__, url_prefix=url_prefix)
         self._register_routes()
 
@@ -49,6 +55,8 @@ class MobileAuthController:
                                     self.redeem_invite, methods=["POST"])
         self.blueprint.add_url_rule("/me", "mobile_me", self.me, methods=["GET"])
         self.blueprint.add_url_rule("/me", "mobile_update_me", self.update_me, methods=["PATCH"])
+        self.blueprint.add_url_rule("/health-educator/session", "mobile_health_educator_session",
+                                    self.health_educator_session, methods=["POST"])
 
     def _bearer(self) -> str:
         hdr = request.headers.get("Authorization", "")
@@ -305,11 +313,17 @@ class MobileAuthController:
         return jsonify(self._svc.bootstrap(user)), 200
 
     def update_me(self) -> Tuple[Any, int]:
-        """PATCH /me (JWT required)   {"default_home_id": "ne_qli_1"}
+        """PATCH /me (JWT required)   {"default_home_id": "ne_qli_1"} and/or
+                                      {"gender": "female"}
 
-        Sets the home the app should open first. It must be one of the
-        caller's active homes. Send null to go back to "no preference"
-        (oldest home). Returns the refreshed identity payload, same as GET /me.
+        default_home_id sets the home the app should open first. It must be
+        one of the caller's active homes. Send null to go back to "no
+        preference" (oldest home).
+
+        gender is "female", "male" or null (not specified). It selects the
+        gender-specific material in health education.
+
+        Returns the refreshed identity payload, same as GET /me.
 
         200 bootstrap / 400 VALIDATION / 401 UNAUTHORIZED
         """
@@ -322,18 +336,74 @@ class MobileAuthController:
             }), 401
 
         body = request.get_json(silent=True)
-        if not isinstance(body, dict) or "default_home_id" not in body:
-            return jsonify({"error": "default_home_id is required (string or null)",
-                            "code": "VALIDATION"}), 400
-        home_id = body["default_home_id"]
-        if home_id is not None and (not isinstance(home_id, str) or not home_id.strip()):
-            return jsonify({"error": "default_home_id must be a home_id or null",
+        if not isinstance(body, dict) or not ({"default_home_id", "gender"} & set(body)):
+            return jsonify({"error": "default_home_id (string or null) or gender "
+                                     "('female', 'male' or null) is required",
                             "code": "VALIDATION"}), 400
 
+        user = None
         try:
-            user = self._svc.set_default_home(user_id, home_id)
+            if "default_home_id" in body:
+                home_id = body["default_home_id"]
+                if home_id is not None and (not isinstance(home_id, str) or not home_id.strip()):
+                    return jsonify({"error": "default_home_id must be a home_id or null",
+                                    "code": "VALIDATION"}), 400
+                user = self._svc.set_default_home(user_id, home_id)
+                if user is None:
+                    return jsonify({"error": "User not found or inactive",
+                                    "code": "UNAUTHORIZED"}), 401
+            if "gender" in body:
+                user = self._svc.set_gender(user_id, body["gender"])
         except ValueError as e:
             return jsonify({"error": str(e), "code": "VALIDATION"}), 400
         if user is None:
             return jsonify({"error": "User not found or inactive", "code": "UNAUTHORIZED"}), 401
         return jsonify(self._svc.bootstrap(user)), 200
+
+    def health_educator_session(self) -> Tuple[Any, int]:
+        """POST /health-educator/session (JWT required, no body)
+
+        Single sign-on into the health educator portal (SCI Companion). Every
+        active smart home user is eligible; the portal account is created on
+        first use. Returns the portal's own tokens and where to call it:
+
+            { "access_token": "...", "refresh_token": "...",
+              "token_type": "Bearer", "expires_in": 1800,
+              "base_url": "https://<portal>", "api_prefix": "/api/mobile/v1",
+              "user": {"username": "...", "full_name": "...", "gender": "female",
+                       "service_line": "sci-companion"} }
+
+        The app then calls {base_url}{api_prefix}/library and /chat with
+        Authorization: Bearer <access_token>.
+
+        401 UNAUTHORIZED / 403 FORBIDDEN (portal refused this account) /
+        502 PORTAL_UNAVAILABLE / 503 NOT_CONFIGURED
+        """
+        token = self._bearer()
+        user_id = self._svc.verify_token(token) if token else None
+        if user_id is None:
+            return jsonify({
+                "error": "Valid login token required. POST /auth/login first.",
+                "code": "UNAUTHORIZED",
+            }), 401
+        user = self._svc.get_user(user_id)
+        if user is None or not user.is_active:
+            return jsonify({"error": "User not found or inactive", "code": "UNAUTHORIZED"}), 401
+
+        if self._health_educator is None or not self._health_educator.configured:
+            return jsonify({"error": "Health education is not set up on this server",
+                            "code": "NOT_CONFIGURED"}), 503
+        try:
+            session = self._health_educator.open_session(user)
+        except HealthEducatorNotConfigured:
+            return jsonify({"error": "Health education is not set up on this server",
+                            "code": "NOT_CONFIGURED"}), 503
+        except HealthEducatorRefused:
+            return jsonify({"error": "This account cannot open health education. "
+                                     "Contact HomeAdapt support.",
+                            "code": "FORBIDDEN"}), 403
+        except HealthEducatorUnavailable:
+            return jsonify({"error": "Health education is temporarily unavailable. "
+                                     "Try again shortly.",
+                            "code": "PORTAL_UNAVAILABLE"}), 502
+        return jsonify(session), 200

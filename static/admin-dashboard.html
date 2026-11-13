@@ -628,6 +628,15 @@
                             <div class="form-hint">Optional — used for mobile app login</div>
                         </div>
                         <div class="form-field">
+                            <label class="form-label" for="user-gender">Gender</label>
+                            <select id="user-gender" class="form-input">
+                                <option value="">Not specified</option>
+                                <option value="female">Female</option>
+                                <option value="male">Male</option>
+                            </select>
+                            <div class="form-hint">Optional — selects gender-specific health education material</div>
+                        </div>
+                        <div class="form-field">
                             <label class="form-label" for="user-userid">User ID</label>
                             <input type="text" id="user-userid" class="form-input">
                             <div class="form-hint">Optional — set to an existing mobile user_ref (e.g. scott_mobile) so historical data stays attached; otherwise auto-generated</div>
@@ -695,6 +704,7 @@
                                     <th>Username</th>
                                     <th>Full Name</th>
                                     <th>Email</th>
+                                    <th>Gender</th>
                                     <th>Status</th>
                                     <th>Created</th>
                                     <th>Actions</th>
@@ -1142,6 +1152,27 @@
             }
         }
 
+        async function setUserGender(userId, username, gender) {
+            try {
+                const response = await fetch(`${API_BASE}/users/${userId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gender: gender || null })
+                });
+                if (response.ok) {
+                    showAlert(`Gender updated for ${username}`, 'success');
+                } else {
+                    const error = await response.json();
+                    showAlert(error.error || 'Failed to update gender', 'error');
+                    loadUsers();
+                }
+            } catch (error) {
+                console.error('Error updating gender:', error);
+                showAlert('Failed to update gender', 'error');
+                loadUsers();
+            }
+        }
+
         async function setUserPassword(userId, username) {
             const password = prompt(`New mobile-login password for "${username}" (8-256 characters):`);
             if (password === null) return;
@@ -1223,6 +1254,13 @@
                     <td>${user.full_name}</td>
                     <td>${user.email || '-'}</td>
                     <td>
+                        <select class="form-input" style="min-width: 120px; padding: 4px 8px;" onchange="setUserGender('${user.user_id}', '${user.username}', this.value)" title="Selects gender-specific health education material">
+                            <option value="" ${!user.gender ? 'selected' : ''}>Not specified</option>
+                            <option value="female" ${user.gender === 'female' ? 'selected' : ''}>Female</option>
+                            <option value="male" ${user.gender === 'male' ? 'selected' : ''}>Male</option>
+                        </select>
+                    </td>
+                    <td>
                         <span class="badge ${user.is_active ? 'badge-success' : 'badge-error'}">
                             ${user.is_active ? 'Active' : 'Inactive'}
                         </span>
@@ -1256,6 +1294,7 @@
             const email = document.getElementById('user-email').value;
             const userId = document.getElementById('user-userid').value.trim();
             const password = document.getElementById('user-password').value;
+            const gender = document.getElementById('user-gender').value;
 
             if (password && password.length < 8) {
                 showAlert('Password must be at least 8 characters', 'error');
@@ -1271,7 +1310,8 @@
                         full_name: fullName,
                         email: email || null,
                         user_id: userId || null,
-                        password: password || null
+                        password: password || null,
+                        gender: gender || null
                     })
                 });
 

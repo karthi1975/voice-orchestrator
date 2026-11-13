@@ -40,6 +40,7 @@ class UserModel(Base):
     # Preferred home (no FK on purpose: a stale value is ignored by the
     # bootstrap's fallback rule rather than blocking home deletion).
     default_home_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    gender: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
 
     def __repr__(self) -> str:
         """String representation."""

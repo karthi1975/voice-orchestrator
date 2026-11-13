@@ -7,7 +7,7 @@ These are pure Python objects with no dependencies on frameworks or infrastructu
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 from app.domain.enums import ClientType, ChallengeStatus
 
 
@@ -78,6 +78,9 @@ class Challenge:
         self.status = ChallengeStatus.FAILED
 
 
+USER_GENDERS = ("female", "male")
+
+
 @dataclass
 class User:
     """
@@ -96,6 +99,9 @@ class User:
         default_home_id: Preferred home to open first (None = oldest home the
             user belongs to). Only honoured while the user is still a member
             of that home and it is active — see MobileAuthService.bootstrap.
+        gender: "female", "male" or None (not specified). Passed to the
+            health educator portal at sign-on, where it selects the
+            gender-specific education material.
     """
     user_id: str
     username: str
@@ -105,6 +111,20 @@ class User:
     email: Optional[str] = None
     password_hash: Optional[str] = None
     default_home_id: Optional[str] = None
+    gender: Optional[str] = None
+
+    @staticmethod
+    def normalize_gender(value: Any) -> Optional[str]:
+        """'female' / 'male' (any casing) or None for "not specified".
+
+        Raises:
+            ValueError: any other value.
+        """
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        if isinstance(value, str) and value.strip().lower() in USER_GENDERS:
+            return value.strip().lower()
+        raise ValueError("gender must be 'female', 'male' or null")
 
     def check_password(self, password: str) -> bool:
         """Verify a plain-text password against the stored hash."""

@@ -27,6 +27,7 @@ class CreateUserRequest(BaseDTO):
     email: Optional[str] = None
     user_id: Optional[str] = None
     password: Optional[str] = None
+    gender: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CreateUserRequest':
@@ -36,7 +37,8 @@ class CreateUserRequest(BaseDTO):
             full_name=require_field(data, 'full_name'),
             email=get_field(data, 'email'),
             user_id=get_field(data, 'user_id'),
-            password=get_field(data, 'password')
+            password=get_field(data, 'password'),
+            gender=get_field(data, 'gender')
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -75,18 +77,26 @@ class UpdateUserRequest(BaseDTO):
     # default_home_id: absent = leave alone; null = clear; string = set
     default_home_id: Optional[str] = None
     clear_default_home: bool = False
+    # gender: absent = leave alone; null or "" = clear; "female" / "male" = set
+    gender: Optional[str] = None
+    clear_gender: bool = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'UpdateUserRequest':
         """Create from dictionary."""
         has_default = isinstance(data, dict) and 'default_home_id' in data
         raw = data.get('default_home_id') if has_default else None
+        has_gender = isinstance(data, dict) and 'gender' in data
+        raw_gender = data.get('gender') if has_gender else None
+        gender_blank = raw_gender is None or (isinstance(raw_gender, str) and not raw_gender.strip())
         return cls(
             username=get_field(data, 'username'),
             full_name=get_field(data, 'full_name'),
             email=get_field(data, 'email'),
             default_home_id=raw.strip() if isinstance(raw, str) and raw.strip() else None,
             clear_default_home=has_default and (raw is None or (isinstance(raw, str) and not raw.strip())),
+            gender=raw_gender if has_gender and not gender_blank else None,
+            clear_gender=has_gender and gender_blank,
         )
 
     def to_dict(self) -> Dict[str, Any]:
