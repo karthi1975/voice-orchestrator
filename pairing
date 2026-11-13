@@ -1,0 +1,12 @@
+Pairing: iPad signs in anonymously → writes {uid, appToken, roomNo, status: "pending"} to roomRegistrations → server checks token + room validity → writes rooms/R503 = {uid}. That doc is the pairing: one room, one device, one patient stay.
+
+Wipe (purge): one server routine deletes everything tied to the room's uid — subscriptions, inbox, the anonymous Auth user, and the room binding. Nothing from the old stay survives.
+
+Three things trigger it:
+1. New device registers the same room → old pairing auto-purged (this is the ADT path today)
+2. Admin writes roomCleanups {roomNo} → immediate purge (future HL7/ADT bridge hooks in here)
+3. No heartbeat for 72h → nightly janitor purges it
+
+After a wipe: the old iPad's session is dead (its Auth user was deleted) — any permission error means: sign in anonymously again, re-register, re-create the subscription. Old messages never carry over.
+
+✻ Cooked for 5s · done 8:45 AM · 1 shell still running

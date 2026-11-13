@@ -1,0 +1,13 @@
+{
+  "name": "smartroom-byod-functions",
+  "description": "Smartroom BYOD lane — additive Cloud Functions (separate codebase; the nine shipped broadcast functions are untouched)",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.1.0"
+  }
+}

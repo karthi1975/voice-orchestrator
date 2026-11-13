@@ -87,3 +87,9 @@ scott_manual_json_test.txt
 scott_skill_setup.txt
 test_favorites.sh
 aaron_curl_calls.txt
+
+# Generated / nested repos
+node_modules/
+firebase-emulator/tools/
+smartbroadcast/
+e7.txt

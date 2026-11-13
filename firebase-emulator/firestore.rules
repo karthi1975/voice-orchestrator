@@ -1,0 +1,126 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // Communities + rooms: any signed-in user may read (to browse/subscribe).
+    // Writes are server-only (Admin SDK bypasses rules).
+    match /communities/{communityId} {
+      allow read: if signedIn();
+      allow write: if false;
+      match /rooms/{roomId} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+    }
+
+    // Subscriptions: a user manages only their own. docId = {uid}_{communityId}.
+    // The 'smartroom' lane is reserved for room displays (anonymous auth) — email
+    // accounts must never subscribe to it, so room and patient audiences stay disjoint.
+    function smartroomAllowed() {
+      return request.resource.data.communityId != 'smartroom'
+             || request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+    match /subscriptions/{subId} {
+      allow read, delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid
+                    && smartroomAllowed();
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+                    && request.resource.data.uid == request.auth.uid
+                    && smartroomAllowed();
+    }
+
+    // Broadcasts: an admin (custom claim) creates directly; the onBroadcastCreated
+    // trigger fans out. No public function endpoint needed. Updates/deletes are
+    // server-only (Admin SDK bypasses rules).
+    match /broadcasts/{broadcastId} {
+      allow read: if false;
+      allow create: if signedIn() && request.auth.token.admin == true
+                    && request.resource.data.communityId is string
+                    && request.resource.data.title is string
+                    && request.resource.data.body is string
+                    && request.resource.data.status == 'queued';
+      allow update, delete: if false;
+    }
+
+    // Room registration (in-hospital iPads, anonymous auth). Device writes one
+    // pending doc {appToken, roomNo, uid}; registerRoom function validates and
+    // binds. Device may read only its own registration to poll the status.
+    match /roomRegistrations/{id} {
+      allow create: if signedIn()
+                    && debug(request.resource.data.uid == request.auth.uid)
+                    && debug(request.resource.data.appToken is string)
+                    && debug(request.resource.data.roomNo is string)
+                    && debug(request.resource.data.status == 'pending');
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // BYOD join requests (relatives' phones, anonymous auth). Phone writes one
+    // pending doc {uid, roomNo, code}; the joinRoom function validates the
+    // room's current join code and mints a 7-day subscription. Same create-only
+    // shape as roomRegistrations.
+    match /roomJoins/{id} {
+      allow create: if signedIn()
+                    && request.auth.token.firebase.sign_in_provider == 'anonymous'
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.roomNo is string
+                    && request.resource.data.code is string
+                    && request.resource.data.status == 'pending';
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Room bindings: the bound device may read its row and refresh heartbeatAt.
+    match /rooms/{roomNo} {
+      allow read: if signedIn()
+                  && (resource.data.uid == request.auth.uid
+                      || request.auth.token.admin == true);
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['heartbeatAt']);
+      allow create, delete: if false;                    // server only
+    }
+
+    // Room cleanups: admin-only trigger for immediate erase (console button /
+    // future ADT bridge). Processed by cleanupRoom function.
+    match /roomCleanups/{id} {
+      allow create: if signedIn() && request.auth.token.admin == true
+                    && request.resource.data.roomNo is string;
+      allow read: if signedIn() && request.auth.token.admin == true;
+      allow update, delete: if false;
+    }
+
+    // Valid-rooms registry + registration secret: admins manage registry;
+    // config is server-only.
+    match /roomRegistry/{roomNo} {
+      allow read, write: if signedIn() && request.auth.token.admin == true;
+    }
+    match /config/{doc} {
+      allow read, write: if false;                       // Admin SDK only
+    }
+
+    // Admin grants: an admin requests promoting/revoking another user; the
+    // grantAdmin function processes it. Admins create + read; never edit/delete.
+    match /adminGrants/{id} {
+      allow create: if signedIn() && request.auth.token.admin == true
+                    && request.resource.data.email is string
+                    && request.resource.data.status == 'pending';
+      allow read: if signedIn() && request.auth.token.admin == true;
+      allow update, delete: if false;
+    }
+
+    // Per-user inbox: owner reads, may flip read/readAt, and may delete their
+    // own copy — fan-out gives each user their own doc, so a delete removes
+    // only that user's message. Fan-out writes via Admin SDK (bypasses rules).
+    match /users/{uid}/inbox/{broadcastId} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow update: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['read', 'readAt']);
+      allow delete: if signedIn() && request.auth.uid == uid;
+      allow create: if false;
+    }
+  }
+}
