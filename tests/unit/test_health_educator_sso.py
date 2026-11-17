@@ -28,7 +28,9 @@ from app.repositories.implementations.in_memory_user_repo import InMemoryUserRep
 from app.repositories.implementations.sqlalchemy_home_repo import SQLAlchemyHomeRepository
 from app.repositories.implementations.sqlalchemy_models import Base
 from app.repositories.implementations.sqlalchemy_user_repo import SQLAlchemyUserRepository
-from app.services.health_educator_service import HealthEducatorService
+from app.services.health_educator_service import (HealthEducatorRefused,
+                                                  HealthEducatorService,
+                                                  HealthEducatorUnavailable)
 from app.services.home_service import HomeService
 from app.services.mobile_auth_service import MobileAuthService
 from app.services.user_service import UserService
@@ -308,3 +310,43 @@ def test_deactivation_succeeds_when_the_portal_is_down(repos):
     app.register_blueprint(controller.blueprint)
     assert app.test_client().delete("/admin/users/scott_mobile").status_code == 200
     assert users.get_by_id("scott_mobile").is_active is False
+
+
+# ---- bulk enrollment (purpose "enroll") ----------------------------------
+
+def test_enroll_posts_an_enroll_assertion_with_the_profile(health, portal, repos):
+    users, _ = repos
+    user = users.get_by_id("scott_mobile")
+    user.gender = "male"
+
+    result = health.enroll(user)
+
+    url, payload = portal.calls[-1]
+    assert url.endswith("/api/mobile/v1/session/enroll")
+    claims = json.loads(_decode(payload["assertion"].split(".")[1]))
+    assert claims["purpose"] == "enroll" and claims["sub"] == "scott_mobile"
+    assert claims["name"] == "Scott Example"
+    assert claims["email"] == "scott@example.com"
+    assert claims["gender"] == "male"
+    assert result["created"] is True and result["linked"] is False
+    assert "access_token" not in result  # enrollment never hands out tokens
+
+
+def test_enroll_refuses_an_inactive_user_without_calling_the_portal(health, portal, repos):
+    users, _ = repos
+    user = users.get_by_id("scott_mobile")
+    user.is_active = False
+    with pytest.raises(HealthEducatorRefused):
+        health.enroll(user)
+    assert portal.calls == []
+
+
+@pytest.mark.parametrize("portal_status,exc", [
+    (403, HealthEducatorRefused), (500, HealthEducatorUnavailable)])
+def test_enroll_maps_portal_errors(repos, portal_status, exc):
+    users, _ = repos
+    portal = FakePortal(status_code=portal_status)
+    health = HealthEducatorService(portal_url="https://p", private_key_pem=PRIVATE_PEM,
+                                   http_post=portal)
+    with pytest.raises(exc):
+        health.enroll(users.get_by_id("scott_mobile"))

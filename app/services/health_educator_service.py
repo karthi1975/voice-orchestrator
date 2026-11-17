@@ -120,7 +120,7 @@ class HealthEducatorService:
             "jti": uuid.uuid4().hex,
             "purpose": purpose,
         }
-        if purpose == "login":
+        if purpose in ("login", "enroll"):
             claims["name"] = user.full_name
             if user.email:
                 claims["email"] = user.email
@@ -176,6 +176,39 @@ class HealthEducatorService:
             "base_url": self._public_url,
             "api_prefix": MOBILE_API_PREFIX,
             "user": body.get("user"),
+        }
+
+    def enroll(self, user: User) -> Dict[str, Any]:
+        """Create/link the user's portal member account WITHOUT a session.
+
+        Unlike open_session, no tokens are minted and the portal records no
+        login, so bulk enrollment does not stamp a false "last login" on
+        every account. Safe to repeat: an already-enrolled user comes back
+        with created=False, linked=False (the portal refreshes gender).
+
+        Raises:
+            HealthEducatorNotConfigured, HealthEducatorUnavailable,
+            HealthEducatorRefused
+        """
+        if not user.is_active:
+            raise HealthEducatorRefused()
+        resp = self._call("enroll", self.sign_assertion(user, "enroll"))
+        if resp.status_code == 403:
+            logger.warning(f"health educator refused enrollment user={user.user_id}")
+            raise HealthEducatorRefused()
+        if resp.status_code != 200:
+            logger.warning(f"health educator enroll failed user={user.user_id} "
+                           f"status={resp.status_code}")
+            raise HealthEducatorUnavailable()
+        body = resp.json()
+        logger.info(f"health educator enrolled user={user.user_id} "
+                    f"created={body.get('created')} linked={body.get('linked')}")
+        return {
+            "username": body.get("username"),
+            "gender": body.get("gender"),
+            "service_line": body.get("service_line"),
+            "created": bool(body.get("created")),
+            "linked": bool(body.get("linked")),
         }
 
     def revoke_sessions(self, user: User) -> bool:
